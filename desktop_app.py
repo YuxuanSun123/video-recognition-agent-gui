@@ -208,12 +208,12 @@ class VideoAgentApp(tk.Tk):
         self._build_sidebar()
 
         self.rail = tk.Frame(self, bg=COLORS["paper_2"], width=44, highlightthickness=2, highlightbackground=COLORS["ink"])
-        self.rail.grid(row=0, column=1, sticky="ns", padx=(0, 0), pady=26)
+        self.rail.grid(row=0, column=1, sticky="ns", padx=(0, 0), pady=0)
         self.rail.grid_propagate(False)
         self._build_rail()
 
         shell = tk.Frame(self, bg=COLORS["ink"], padx=0, pady=0)
-        shell.grid(row=0, column=2, sticky="nsew", padx=(0, 28), pady=(26, 34))
+        shell.grid(row=0, column=2, sticky="nsew", padx=0, pady=0)
         shell.columnconfigure(0, weight=1)
         shell.rowconfigure(0, weight=1)
 
