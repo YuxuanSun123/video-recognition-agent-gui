@@ -169,7 +169,7 @@ async function loadConfig() {
     els.configRegion.value = config.region || "cn-beijing";
     els.configBaseUrl.value = config.baseURLRaw || "";
     els.configVisionModel.value = config.visionModel || "qwen3.6-plus";
-    els.configOmniModel.value = config.omniModel || "qwen3.5-omni-plus";
+    els.configOmniModel.value = config.omniModel || "qwen3.6-plus";
     els.configOssAccessKeyId.value = "";
     els.configOssAccessKeySecret.value = "";
     els.configOssRegion.value = config.ossRegion || "oss-cn-beijing";

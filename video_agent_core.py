@@ -59,7 +59,7 @@ def get_config():
         "workspace_id": value("DASHSCOPE_WORKSPACE_ID"),
         "region": value("DASHSCOPE_REGION", "cn-beijing"),
         "vision_model": value("ALIYUN_VISION_MODEL", "qwen3.6-plus"),
-        "omni_model": value("ALIYUN_OMNI_MODEL", "qwen3.5-omni-plus"),
+        "omni_model": value("ALIYUN_OMNI_MODEL", "qwen3.6-plus"),
         "github_token": value("GITHUB_TOKEN"),
         "github_owner": value("GITHUB_OWNER"),
         "github_repo": value("GITHUB_REPO"),
@@ -91,7 +91,7 @@ def save_config(updates):
         "DASHSCOPE_WORKSPACE_ID": updates.get("workspace_id"),
         "DASHSCOPE_REGION": updates.get("region") or "cn-beijing",
         "ALIYUN_VISION_MODEL": updates.get("vision_model") or "qwen3.6-plus",
-        "ALIYUN_OMNI_MODEL": updates.get("omni_model") or "qwen3.5-omni-plus",
+        "ALIYUN_OMNI_MODEL": updates.get("omni_model") or "qwen3.6-plus",
         "GITHUB_TOKEN": updates.get("github_token"),
         "GITHUB_OWNER": updates.get("github_owner"),
         "GITHUB_REPO": updates.get("github_repo"),
@@ -261,6 +261,7 @@ def analyze_local_path(config, title, local_path, fps, subtitle_text, custom_pro
 def analyze_video_url(config, title, video_url, analysis_mode, fps, subtitle_text, custom_prompt):
     model = config["omni_model"] if analysis_mode == "omni" else config["vision_model"]
     can_understand_audio = analysis_mode == "omni"
+    needs_omni_stream = analysis_mode == "omni" and is_omni_family_model(model)
     prompt = build_analysis_prompt(
         title=title,
         fps=fps,
@@ -281,7 +282,7 @@ def analyze_video_url(config, title, video_url, analysis_mode, fps, subtitle_tex
         ],
         "temperature": 0.2,
     }
-    if analysis_mode == "omni":
+    if needs_omni_stream:
         payload["stream"] = True
         payload["stream_options"] = {"include_usage": True}
         payload["modalities"] = ["text"]
@@ -300,6 +301,10 @@ def analyze_video_url(config, title, video_url, analysis_mode, fps, subtitle_tex
 
     report = normalize_report(parse_model_json(content), title=title, video_url=video_url, fps=fps)
     return {"mode": analysis_mode, "report": report, "raw": raw}
+
+
+def is_omni_family_model(model):
+    return "omni" in str(model or "").lower()
 
 
 def call_chat(config, payload):
