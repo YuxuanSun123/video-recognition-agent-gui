@@ -1,0 +1,83 @@
+name: Release Desktop Builds
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v0.2.0
+        required: true
+        default: v0.2.0
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            label: Windows
+            args: ""
+          - platform: macos-latest
+            label: macOS
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set release tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "RELEASE_TAG=${{ github.event.inputs.tag }}" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and upload ${{ matrix.label }} bundle
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: "-"
+        with:
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: "Shot Reader ${{ env.RELEASE_TAG }}"
+          releaseBody: |
+            Shot Reader desktop build.
+
+            - Windows: installer / portable package assets.
+            - macOS: app bundle generated on GitHub macOS runner.
+
+            API keys are not bundled. Configure DashScope inside the app after launch.
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
