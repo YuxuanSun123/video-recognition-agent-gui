@@ -79,7 +79,8 @@ function App() {
     loadSettings();
   }, []);
 
-  const shots = report.shots?.length ? report.shots : demoShots;
+  const hasReport = Boolean(report.shots?.length);
+  const shots = hasReport ? report.shots : demoShots;
   const meta = report.meta || emptyReport.meta;
   const shownShots = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -240,7 +241,10 @@ function App() {
               meta={meta}
               shots={shownShots}
               totalShots={shots.length}
+              hasReport={hasReport}
+              isDemo={!hasReport}
               busy={busy}
+              status={status}
               filter={filter}
               setFilter={setFilter}
               onAnalyze={runAnalyze}
@@ -265,10 +269,10 @@ function Sidebar({ tab, setTab, status, health }) {
         逐镜<br />拉片<span className="en">SHOT READER</span>
       </div>
       <nav className="rail-nav">
-        <button className={tab === "analysis" ? "on" : ""} onClick={() => setTab("analysis")}>分析任务</button>
-        <button className={tab === "library" ? "on" : ""} onClick={() => setTab("library")}>报告库</button>
-        <button className={tab === "prompts" ? "on" : ""} onClick={() => setTab("prompts")}>提示词</button>
-        <button className={tab === "settings" ? "on" : ""} onClick={() => setTab("settings")}>设置与密钥</button>
+        <button type="button" aria-current={tab === "analysis" ? "page" : undefined} className={tab === "analysis" ? "on" : ""} onClick={() => setTab("analysis")}>分析任务</button>
+        <button type="button" aria-current={tab === "library" ? "page" : undefined} className={tab === "library" ? "on" : ""} onClick={() => setTab("library")}>报告库</button>
+        <button type="button" aria-current={tab === "prompts" ? "page" : undefined} className={tab === "prompts" ? "on" : ""} onClick={() => setTab("prompts")}>提示词</button>
+        <button type="button" aria-current={tab === "settings" ? "page" : undefined} className={tab === "settings" ? "on" : ""} onClick={() => setTab("settings")}>设置与密钥</button>
       </nav>
       <div className="rail-stat">
         <div className="v"><i />{status}</div>
@@ -311,7 +315,10 @@ function AnalysisPage(props) {
     meta,
     shots,
     totalShots,
+    hasReport,
+    isDemo,
     busy,
+    status,
     filter,
     setFilter,
     onAnalyze,
@@ -327,8 +334,8 @@ function AnalysisPage(props) {
         title="视频识别 Agent · 逐镜拉片"
         actions={
           <>
-            <button className="obtn" onClick={onExportMarkdown}>导出 MD</button>
-            <button className="obtn" onClick={onExportCsv}>导出 CSV</button>
+            <button className="obtn" disabled={!hasReport || busy} onClick={onExportMarkdown}>导出 MD</button>
+            <button className="obtn" disabled={!hasReport || busy} onClick={onExportCsv}>导出 CSV</button>
             <button className="obtn run" disabled={busy} onClick={onAnalyze}>{busy ? "分析中..." : "开始分析 →"}</button>
           </>
         }
@@ -355,6 +362,12 @@ function AnalysisPage(props) {
                 <span className="l">{file?.name || form.videoUrl || "▶ 等待视频 URL"}</span>
               </div>
             </div>
+            <div className={`status-strip ${busy ? "live" : ""}`}>
+              <span className="led" />
+              <strong>{busy ? "ANALYZING" : hasReport ? "REPORT READY" : "READY"}</strong>
+              <span>{status}</span>
+              <span className="right">{form.analysisMode === "omni" ? "声音/对白专精" : "视频理解主力"} · {uploadLabel(form.uploadMode)}</span>
+            </div>
             <div className="form">
               <Field span="s3" label="视频公网 URL"><input className="inp" value={form.videoUrl} onChange={(e) => updateForm("videoUrl", e.target.value)} placeholder="https://example.com/clip.mp4" /></Field>
               <Field span="s2" label="报告标题"><input className="inp" value={form.title} onChange={(e) => updateForm("title", e.target.value)} /></Field>
@@ -378,10 +391,11 @@ function AnalysisPage(props) {
           </button>
           <div className="dwbody">
             <div className="ttools">
-              <div className="l"><span className="otag acid">逐镜表格</span><span className="otag">{totalShots} 镜头</span><span className="otag">{sceneCount} 场景</span></div>
+              <div className="l"><span className="otag acid">逐镜表格</span><span className="otag">{isDemo ? "样例数据" : `${totalShots} 镜头`}</span><span className="otag">{sceneCount} 场景</span></div>
               <input className="filter" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="筛选镜头、画面、注释" />
             </div>
-            <ShotTable shots={shots} />
+            {busy && <div className="busybar"><span />正在等待模型返回结构化逐镜结果</div>}
+            <ShotTable shots={shots} isDemo={isDemo} />
           </div>
         </section>
       </div>
@@ -389,10 +403,20 @@ function AnalysisPage(props) {
   );
 }
 
-function ShotTable({ shots }) {
+function ShotTable({ shots, isDemo }) {
   return (
     <div className="tabscroll">
       <table className="rtab">
+        <colgroup>
+          <col className="c-thumb" />
+          <col className="c-shot" />
+          <col className="c-time" />
+          <col className="c-size" />
+          <col className="c-camera" />
+          <col className="c-visual" />
+          <col className="c-analysis" />
+          <col className="c-audio" />
+        </colgroup>
         <thead>
           <tr>
             <th>截图</th><th>镜号</th><th>时间码</th><th>景别</th><th>镜头运动</th><th>画面内容 / 人物动作</th><th>分析注释</th><th>声音 / 音乐</th>
@@ -401,7 +425,13 @@ function ShotTable({ shots }) {
         <tbody>
           {shots.map((shot, index) => (
             <tr key={`${shot.shot || index}-${shot.timecode || index}`}>
-              <td>{shot.thumbnailUrl ? <img className="thumb-img" src={`${API_BASE}${shot.thumbnailUrl}`} alt={shot.shot || "shot"} /> : <div className="thumb">▶ FRAME</div>}</td>
+              <td className="thumb-cell">
+                {shot.thumbnailUrl ? (
+                  <img className="thumb-img" src={`${API_BASE}${shot.thumbnailUrl}`} alt={shot.shot || "shot"} />
+                ) : (
+                  <div className={`thumb ${isDemo ? "demo" : "missing"}`}><span>▶</span><em>{isDemo ? "SAMPLE" : "NO FRAME"}</em></div>
+                )}
+              </td>
               <td className="shotno">{shot.shot || `镜 ${index + 1}`}</td>
               <td className="nw">{shot.timecode}</td>
               <td className="nw">{shot.shotSize}</td>
