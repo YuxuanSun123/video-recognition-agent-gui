@@ -27,6 +27,7 @@ try {
         --noconfirm `
         --clean `
         --onefile `
+        --noconsole `
         --name $SidecarName `
         --collect-all dashscope `
         --collect-all fastapi `
