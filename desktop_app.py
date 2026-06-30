@@ -506,7 +506,11 @@ class VideoAgentApp(tk.Tk):
 
         self.input_panel = self._section(self.analysis_stage, "1", "输入设置 · SETUP", "报告封面 + 印刷表单网格")
         self.input_panel.place(x=0, y=0, relwidth=1, relheight=1)
-        self._build_input_panel(self.input_panel.body)
+        self.input_panel.body.columnconfigure(0, weight=1)
+        self.input_panel.body.rowconfigure(0, weight=1)
+        self.input_scroll_shell, self.input_scroll_body = self._scrollable_frame(self.input_panel.body, bordered=False)
+        self.input_scroll_shell.grid(row=0, column=0, sticky="nsew")
+        self._build_input_panel(self.input_scroll_body)
 
         self.input_handle = self._drawer_handle(
             self.analysis_stage,
@@ -728,7 +732,7 @@ class VideoAgentApp(tk.Tk):
         width = max(self.analysis_stage.winfo_width(), 1)
         height = max(self.analysis_stage.winfo_height(), 120)
         y = int(round(self.drawer_y))
-        self.result_drawer.place_configure(x=0, y=y, width=width, height=max(height - y, 58))
+        self.result_drawer.place_configure(x=0, y=y, width=width, height=height)
         if self.drawer_active:
             self.input_handle.place_configure(y=0, height=54, width=width)
         else:
@@ -769,7 +773,7 @@ class VideoAgentApp(tk.Tk):
             self._place_drawer()
             return
         started_at = time.perf_counter()
-        duration = 0.42
+        duration = 0.46
 
         def step():
             elapsed = time.perf_counter() - started_at
@@ -788,7 +792,9 @@ class VideoAgentApp(tk.Tk):
 
     def _ease_mechanical(self, progress):
         progress = max(0, min(progress, 1))
-        return 1 - pow(1 - progress, 3)
+        if progress < 0.5:
+            return 4 * progress * progress * progress
+        return 1 - pow(-2 * progress + 2, 3) / 2
 
     def _build_reports(self):
         self.report_page.columnconfigure(0, weight=1)
@@ -875,8 +881,13 @@ class VideoAgentApp(tk.Tk):
         tk.Label(form, textvariable=self.secret_note, bg=COLORS["paper"], fg=COLORS["muted"], font=(FONT_MONO, 8)).grid(row=12, column=0, columnspan=2, sticky="w", padx=14, pady=(18, 8))
         self._header_button(form, "保存配置", self.save_settings, primary=True).grid(row=13, column=1, sticky="e", padx=14, pady=(8, 18))
 
-    def _scrollable_frame(self, parent):
-        outer = tk.Frame(parent, bg=COLORS["paper"], highlightthickness=2, highlightbackground=COLORS["ink"])
+    def _scrollable_frame(self, parent, bordered=True):
+        outer = tk.Frame(
+            parent,
+            bg=COLORS["paper"],
+            highlightthickness=2 if bordered else 0,
+            highlightbackground=COLORS["ink"],
+        )
         outer.columnconfigure(0, weight=1)
         outer.rowconfigure(0, weight=1)
         canvas = tk.Canvas(outer, bg=COLORS["paper"], highlightthickness=0, bd=0)
@@ -889,17 +900,27 @@ class VideoAgentApp(tk.Tk):
 
         def update_region(_event=None):
             canvas.configure(scrollregion=canvas.bbox("all"))
+            bbox = canvas.bbox("all")
+            content_height = bbox[3] - bbox[1] if bbox else 0
+            visible_height = canvas.winfo_height()
+            if bordered or content_height > visible_height + 2:
+                scrollbar.grid(row=0, column=1, sticky="ns")
+            else:
+                scrollbar.grid_remove()
 
         def update_width(event):
             canvas.itemconfigure(window_id, width=event.width)
 
         def on_wheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            if event.delta:
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
         content.bind("<Configure>", update_region)
-        canvas.bind("<Configure>", update_width)
+        canvas.bind("<Configure>", lambda event: (update_width(event), update_region()))
         canvas.bind("<Enter>", lambda _event: canvas.bind_all("<MouseWheel>", on_wheel))
         canvas.bind("<Leave>", lambda _event: canvas.unbind_all("<MouseWheel>"))
+        outer.canvas = canvas
+        outer.scrollbar = scrollbar
         return outer, content
 
     def _section(self, parent, number, title, right_text):
