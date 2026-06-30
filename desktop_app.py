@@ -74,10 +74,13 @@ class VideoAgentApp(tk.Tk):
         self.report = None
         self.tree_item_map = {}
         self.thumbnail_images = {}
+        self.thumbnail_cache = {}
         self.fields = {}
         self.page_buttons = {}
         self.pages = {}
         self.hover_item = None
+        self.hover_after = None
+        self.pending_hover_item = None
         self.drawer_active = False
         self.drawer_anim_after = None
         self.drawer_y = 0
@@ -146,7 +149,7 @@ class VideoAgentApp(tk.Tk):
             "padding": 8,
         }
         self.style.configure("TEntry", **field_opts)
-        self.style.configure("Focus.TEntry", **{**field_opts, "bordercolor": COLORS["acid"], "lightcolor": COLORS["acid"], "darkcolor": COLORS["acid"], "padding": 10})
+        self.style.configure("Focus.TEntry", **{**field_opts, "bordercolor": COLORS["acid"], "lightcolor": COLORS["acid"], "darkcolor": COLORS["acid"]})
         self.style.configure(
             "TCombobox",
             fieldbackground=COLORS["white"],
@@ -167,7 +170,7 @@ class VideoAgentApp(tk.Tk):
             bordercolor=COLORS["acid"],
             lightcolor=COLORS["acid"],
             darkcolor=COLORS["acid"],
-            padding=10,
+            padding=8,
         )
         self.style.map(
             "TCombobox",
@@ -637,7 +640,7 @@ class VideoAgentApp(tk.Tk):
         self.tree = ttk.Treeview(
             table_wrap,
             style="Overprint.Treeview",
-            columns=("shot", "timecode", "size", "camera", "visual", "audio", "analysis"),
+            columns=("shot", "timecode", "size", "camera", "visual", "analysis", "audio"),
             show="tree headings",
             selectmode="browse",
             height=12,
@@ -645,18 +648,18 @@ class VideoAgentApp(tk.Tk):
         self.tree.heading("#0", text="截图")
         self.tree.column("#0", width=96, minwidth=96, stretch=False, anchor="center")
         columns = {
-            "shot": ("镜号", 78),
-            "timecode": ("时间码", 112),
-            "size": ("景别", 80),
-            "camera": ("镜头运动", 108),
-            "visual": ("画面内容 / 人物动作", 340),
-            "audio": ("声音 / 音乐", 200),
-            "analysis": ("分析注释", 320),
+            "shot": ("镜号", 64),
+            "timecode": ("时间码", 104),
+            "size": ("景别", 72),
+            "camera": ("镜头运动", 96),
+            "visual": ("画面内容 / 人物动作", 300),
+            "analysis": ("分析注释", 330),
+            "audio": ("声音 / 音乐", 170),
         }
         for key, (label, width) in columns.items():
             self.tree.heading(key, text=label)
             anchor = "center" if key == "shot" else "w"
-            self.tree.column(key, width=width, minwidth=width, anchor=anchor, stretch=key in {"visual", "analysis"})
+            self.tree.column(key, width=width, minwidth=width, anchor=anchor, stretch=key in {"visual", "analysis", "audio"})
         y_scroll = ttk.Scrollbar(table_wrap, orient="vertical", command=self.tree.yview)
         x_scroll = ttk.Scrollbar(table_wrap, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
@@ -986,12 +989,12 @@ class VideoAgentApp(tk.Tk):
             widget.bind("<FocusOut>", lambda _event: widget.configure(style="TCombobox"))
             return
         if isinstance(widget, (tk.Entry, tk.Text)):
-            widget.bind("<FocusIn>", lambda _event: widget.configure(highlightthickness=3, highlightbackground=COLORS["acid"], highlightcolor=COLORS["acid"]))
+            widget.bind("<FocusIn>", lambda _event: widget.configure(highlightbackground=COLORS["acid"], highlightcolor=COLORS["acid"]))
             widget.bind("<FocusOut>", lambda _event: widget.configure(highlightthickness=1, highlightbackground=COLORS["ink"], highlightcolor=COLORS["acid"]))
             return
         if isinstance(widget, tk.Frame):
             def focus_frame(_event=None):
-                widget.configure(highlightthickness=3, highlightbackground=COLORS["acid"])
+                widget.configure(highlightbackground=COLORS["acid"])
 
             def blur_frame(_event=None):
                 widget.configure(highlightthickness=1, highlightbackground=COLORS["ink"])
@@ -1246,8 +1249,8 @@ class VideoAgentApp(tk.Tk):
                     shot.get("shotSize", ""),
                     shot.get("camera", ""),
                     self.compact(shot.get("visual", "")),
-                    self.compact(shot.get("audio", "")),
                     self.compact(shot.get("analysis", "")),
+                    self.compact(shot.get("audio", "")),
                 ),
                 tags=("odd" if index % 2 else "even",),
             )
@@ -1270,7 +1273,10 @@ class VideoAgentApp(tk.Tk):
         if not thumb_path.exists():
             return None
         try:
-            return tk.PhotoImage(file=str(thumb_path))
+            cache_key = str(thumb_path)
+            if cache_key not in self.thumbnail_cache:
+                self.thumbnail_cache[cache_key] = tk.PhotoImage(file=cache_key)
+            return self.thumbnail_cache[cache_key]
         except tk.TclError:
             return None
 
@@ -1283,16 +1289,28 @@ class VideoAgentApp(tk.Tk):
             self.update_detail(shot)
 
     def on_tree_motion(self, event):
-        item = self.tree.identify_row(event.y)
+        self.pending_hover_item = self.tree.identify_row(event.y)
+        if self.pending_hover_item == self.hover_item:
+            return
+        if self.hover_after is None:
+            self.hover_after = self.after(45, self.apply_tree_hover)
+
+    def apply_tree_hover(self):
+        self.hover_after = None
+        item = self.pending_hover_item
         if item == self.hover_item:
             return
         self.clear_tree_hover()
-        if item:
+        if item and self.tree.exists(item):
             tags = tuple(tag for tag in self.tree.item(item, "tags") if tag != "hover")
             self.tree.item(item, tags=tags + ("hover",))
             self.hover_item = item
 
     def clear_tree_hover(self, _event=None):
+        if self.hover_after is not None:
+            self.after_cancel(self.hover_after)
+            self.hover_after = None
+        self.pending_hover_item = None
         if self.hover_item and self.tree.exists(self.hover_item):
             tags = tuple(tag for tag in self.tree.item(self.hover_item, "tags") if tag != "hover")
             self.tree.item(self.hover_item, tags=tags)
@@ -1308,9 +1326,9 @@ class VideoAgentApp(tk.Tk):
             "",
             f"画面内容 / 人物动作：\n{shot.get('visual', '')}",
             "",
-            f"声音 / 音乐：\n{shot.get('audio', '')}",
-            "",
             f"分析注释：\n{shot.get('analysis', '')}",
+            "",
+            f"声音 / 音乐：\n{shot.get('audio', '')}",
         ]
         self._set_text(self.detail_text, "\n".join(lines))
 
