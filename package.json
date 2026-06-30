@@ -1,0 +1,16 @@
+{
+  "name": "video-shot-report-platform",
+  "version": "0.1.0",
+  "description": "A lightweight platform for video shot-by-shot analysis reports powered by Aliyun Model Studio vision APIs.",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch server.mjs",
+    "start": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ali-oss": "^6.23.0"
+  }
+}

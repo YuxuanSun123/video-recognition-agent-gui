@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>逐镜拉片工作台</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">V</div>
+          <div>
+            <strong>逐镜拉片工作台</strong>
+            <span>Video Insight Agent</span>
+          </div>
+        </div>
+
+        <nav class="nav-list" aria-label="工作区">
+          <button class="nav-item active" data-page="analysis" type="button">分析任务</button>
+          <button class="nav-item" data-page="library" type="button">报告库</button>
+          <button class="nav-item" data-page="prompts" type="button">提示词</button>
+          <button class="nav-item" data-page="settings" type="button">设置</button>
+        </nav>
+
+        <section class="status-panel">
+          <span class="panel-label">接口状态</span>
+          <strong id="apiStatus">检查中</strong>
+          <p id="apiHint">正在读取本地后端配置。</p>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="pageEyebrow">Shot-by-shot report</p>
+            <h1 id="pageTitle">视频识别 Agent 承载平台</h1>
+          </div>
+          <div class="toolbar" id="analysisToolbar">
+            <button class="icon-button" id="exportMarkdown" type="button" title="导出 Markdown">MD</button>
+            <button class="icon-button" id="exportCsv" type="button" title="导出 CSV">CSV</button>
+            <button class="primary-button" id="runAnalysis" type="button">开始分析</button>
+          </div>
+        </header>
+
+        <section class="input-band" aria-label="视频输入">
+          <div class="field wide">
+            <label for="videoUrl">视频公网 URL</label>
+            <input id="videoUrl" type="url" placeholder="https://example.com/video.mp4">
+          </div>
+          <div class="field">
+            <label for="title">报告标题</label>
+            <input id="title" type="text" value="《风骚律师》S02E01 逐镜拉片报告">
+          </div>
+          <div class="field small">
+            <label for="fps">抽帧 fps</label>
+            <select id="fps">
+              <option value="0.2">0.2</option>
+              <option value="0.5">0.5</option>
+              <option value="1" selected>1</option>
+              <option value="2">2</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="analysisMode">分析模型</label>
+            <select id="analysisMode">
+              <option value="omni" selected>全模态：视频 + 声音</option>
+              <option value="vision">视觉：大文件拉片</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="uploadMode">上传方式</label>
+            <select id="uploadMode">
+              <option value="local" selected>本地路径：100MB 视觉</option>
+              <option value="oss">OSS 公网 URL</option>
+              <option value="github">GitHub Releases</option>
+            </select>
+          </div>
+          <div class="field file-field">
+            <label for="videoFile">本地文件</label>
+            <input id="videoFile" type="file" accept="video/*">
+            <span>上传到本机后端；100MB 本地路径模式</span>
+          </div>
+        </section>
+
+        <section class="prompt-band" aria-label="补充信息">
+          <div class="field">
+            <label for="subtitleText">字幕 / 音轨转写</label>
+            <textarea id="subtitleText" rows="3" placeholder="视觉模式可粘贴字幕或转写；全模态模式可作为校对材料"></textarea>
+          </div>
+          <div class="field">
+            <label for="prompt">补充分析要求</label>
+            <textarea id="prompt" rows="3" placeholder="例如：重点分析镜头运动、人物关系和叙事转折"></textarea>
+          </div>
+        </section>
+
+        <section class="report-cover" aria-label="报告封面">
+          <div class="cover-preview">
+            <video id="sourcePreview" controls muted playsinline></video>
+            <div id="emptyPreview" class="empty-preview">等待视频 URL</div>
+          </div>
+          <div class="cover-copy">
+            <p class="eyebrow">Analysis brief</p>
+            <h2 id="reportTitle">《风骚律师》S02E01 逐镜拉片报告</h2>
+            <p id="reportSubtitle">全片约 47 分钟，基于逐秒截帧的电影学院视听语言分析。</p>
+            <div class="metric-row">
+              <div><strong id="sceneCount">3</strong><span>场景</span></div>
+              <div><strong id="shotCount">8</strong><span>镜头</span></div>
+              <div><strong id="basis">Demo</strong><span>分析依据</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="table-tools" aria-label="筛选">
+          <div class="field search-field">
+            <label for="search">检索镜头</label>
+            <input id="search" type="search" placeholder="搜索人物、动作、注释、时间码">
+          </div>
+          <div class="field small">
+            <label for="sceneFilter">场景</label>
+            <select id="sceneFilter">
+              <option value="">全部</option>
+            </select>
+          </div>
+          <div class="progress-line" id="progressLine">就绪</div>
+        </section>
+
+        <section class="report-table-wrap" aria-label="逐镜表格">
+          <table class="report-table">
+            <thead>
+              <tr>
+                <th>截图</th>
+                <th>镜号</th>
+                <th>时间码</th>
+                <th>景别</th>
+                <th>镜头运动</th>
+                <th>画面内容 / 人物动作</th>
+                <th>声音 / 音乐</th>
+                <th>分析注释</th>
+              </tr>
+            </thead>
+            <tbody id="shotRows"></tbody>
+          </table>
+        </section>
+
+        <section class="settings-page hidden" id="settingsPage" aria-label="API 设置">
+          <div class="settings-card">
+            <div>
+              <p class="eyebrow">Aliyun Model Studio</p>
+              <h2>保存 API 配置</h2>
+              <p class="settings-copy">配置会写入本机项目目录下的 .env 文件。API Key 只在后端保存，页面再次打开时只显示脱敏状态。</p>
+            </div>
+            <form class="config-form" id="configForm">
+              <div class="field">
+                <label for="configApiKey">DASHSCOPE_API_KEY</label>
+                <input id="configApiKey" type="password" autocomplete="off" placeholder="sk-...">
+                <span class="field-note" id="apiKeyMasked">未保存密钥</span>
+              </div>
+              <div class="settings-grid">
+                <div class="field">
+                  <label for="configWorkspace">Workspace ID</label>
+                  <input id="configWorkspace" type="text" placeholder="可选，例如 llm-xxxxx">
+                </div>
+                <div class="field">
+                  <label for="configRegion">Region</label>
+                  <input id="configRegion" type="text" value="cn-beijing">
+                </div>
+              </div>
+              <div class="field">
+                <label for="configBaseUrl">兼容模式 Base URL</label>
+                <input id="configBaseUrl" type="url" placeholder="留空时根据 Workspace ID 自动生成">
+                <span class="field-note" id="resolvedBaseUrl">当前会使用默认 DashScope 地址</span>
+              </div>
+              <div class="settings-grid">
+                <div class="field">
+                  <label for="configVisionModel">视觉模型</label>
+                  <input id="configVisionModel" type="text" value="qwen3.6-plus">
+                </div>
+                <div class="field">
+                  <label for="configOmniModel">全模态模型</label>
+                  <input id="configOmniModel" type="text" value="qwen3.5-omni-plus">
+                </div>
+              </div>
+              <div class="settings-divider">
+                <h3>OSS 公网 URL 上传</h3>
+                <p>用于把本地视频上传到 OSS，并生成百炼模型可读取的签名 URL。</p>
+              </div>
+              <div class="settings-grid">
+                <div class="field">
+                  <label for="configOssAccessKeyId">OSS AccessKey ID</label>
+                  <input id="configOssAccessKeyId" type="password" autocomplete="off" placeholder="LTAI...">
+                  <span class="field-note" id="ossKeyMasked">未保存 OSS Key</span>
+                </div>
+                <div class="field">
+                  <label for="configOssAccessKeySecret">OSS AccessKey Secret</label>
+                  <input id="configOssAccessKeySecret" type="password" autocomplete="off" placeholder="只在后端保存">
+                </div>
+              </div>
+              <div class="settings-grid">
+                <div class="field">
+                  <label for="configOssRegion">OSS Region</label>
+                  <input id="configOssRegion" type="text" value="oss-cn-beijing">
+                </div>
+                <div class="field">
+                  <label for="configOssBucket">OSS Bucket</label>
+                  <input id="configOssBucket" type="text" placeholder="your-bucket">
+                </div>
+              </div>
+              <div class="settings-grid">
+                <div class="field">
+                  <label for="configOssEndpoint">OSS Endpoint</label>
+                  <input id="configOssEndpoint" type="text" placeholder="可选，如 oss-cn-beijing.aliyuncs.com">
+                </div>
+                <div class="field">
+                  <label for="configOssPrefix">对象前缀</label>
+                  <input id="configOssPrefix" type="text" value="video-agent">
+                </div>
+              </div>
+              <div class="field">
+                <label for="configOssExpires">签名 URL 有效期（秒）</label>
+                <input id="configOssExpires" type="number" min="600" max="604800" value="86400">
+              </div>
+              <div class="settings-divider">
+                <h3>GitHub Releases 临时 URL</h3>
+                <p>上传为 Release asset，并使用 browser_download_url 作为视频公网 URL。仓库建议使用 public。</p>
+              </div>
+              <div class="settings-grid">
+                <div class="field">
+                  <label for="configGithubToken">GitHub Token</label>
+                  <input id="configGithubToken" type="password" autocomplete="off" placeholder="ghp_... 或 fine-grained token">
+                  <span class="field-note" id="githubTokenMasked">未保存 GitHub Token</span>
+                </div>
+                <div class="field">
+                  <label for="configGithubOwner">Owner</label>
+                  <input id="configGithubOwner" type="text" placeholder="用户名或组织名">
+                </div>
+              </div>
+              <div class="settings-grid">
+                <div class="field">
+                  <label for="configGithubRepo">Repo</label>
+                  <input id="configGithubRepo" type="text" placeholder="公开仓库名">
+                </div>
+                <div class="field">
+                  <label for="configGithubReleaseTag">Release Tag</label>
+                  <input id="configGithubReleaseTag" type="text" value="video-agent-temp">
+                </div>
+              </div>
+              <div class="settings-grid">
+                <div class="field">
+                  <label for="configGithubReleaseName">Release Name</label>
+                  <input id="configGithubReleaseName" type="text" value="Video Agent Temporary Uploads">
+                </div>
+                <div class="field">
+                  <label for="configGithubAssetPrefix">Asset Prefix</label>
+                  <input id="configGithubAssetPrefix" type="text" value="video-agent">
+                </div>
+              </div>
+              <div class="settings-actions">
+                <button class="primary-button" id="saveConfig" type="submit">保存配置</button>
+                <button class="icon-button" id="reloadConfig" type="button">刷新</button>
+                <button class="icon-button danger-button" id="clearApiKey" type="button">清空 Key</button>
+                <button class="icon-button danger-button" id="clearOssKeys" type="button">清空 OSS</button>
+                <button class="icon-button danger-button" id="clearGithubToken" type="button">清空 GitHub</button>
+              </div>
+              <p class="config-status" id="configStatus">就绪</p>
+            </form>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
