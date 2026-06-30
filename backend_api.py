@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 import tempfile
@@ -10,6 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from video_agent_core import (
+    ROOT as DATA_ROOT,
     analyze_video,
     get_config,
     mask_secret,
@@ -18,7 +20,7 @@ from video_agent_core import (
 )
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = DATA_ROOT
 CACHE_DIR = ROOT / ".cache"
 UPLOAD_DIR = CACHE_DIR / "uploads"
 THUMB_DIR = CACHE_DIR / "thumbnails"
@@ -206,3 +208,15 @@ def time_string_to_seconds(value, fallback=0):
     if len(nums) == 1:
         return nums[0]
     return fallback
+
+
+def main():
+    import uvicorn
+
+    host = os.environ.get("VIDEO_AGENT_HOST", "127.0.0.1")
+    port = int(os.environ.get("VIDEO_AGENT_PORT", "8765"))
+    uvicorn.run(app, host=host, port=port, log_level=os.environ.get("VIDEO_AGENT_LOG_LEVEL", "info"))
+
+
+if __name__ == "__main__":
+    main()

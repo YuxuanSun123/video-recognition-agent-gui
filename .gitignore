@@ -1,9 +1,13 @@
 .env
 node_modules/
+.venv/
 dist/
 target/
+build/
 .cache/
 __pycache__/
 *.pyc
 *.log
+*.spec
+src-tauri/binaries/*.exe
 cache_overprint_template.html

@@ -67,6 +67,20 @@ Tauri 桌面壳开发模式：
 npm run tauri:dev
 ```
 
+构建 Windows 桌面安装包：
+
+```powershell
+npm run tauri:build
+```
+
+构建产物会输出到：
+
+```text
+src-tauri/target/release/shot-reader.exe
+src-tauri/target/release/bundle/msi/
+src-tauri/target/release/bundle/nsis/
+```
+
 旧版 Tkinter 备用入口：
 
 ```text
@@ -103,6 +117,8 @@ DASHSCOPE_BASE_URL=https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible
 ```
 
 `.env` 已被 `.gitignore` 忽略，不会提交到仓库。
+
+开发模式默认读取项目根目录 `.env`。打包后的 Tauri 应用会把配置、上传缓存和缩略图保存到系统应用数据目录，避免写入安装目录或 PyInstaller 临时目录。
 
 ## 视频输入方式
 

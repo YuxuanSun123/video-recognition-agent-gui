@@ -10,7 +10,16 @@ from urllib.parse import quote
 import requests
 
 
-ROOT = Path(__file__).resolve().parent
+def resolve_data_root():
+    override = os.environ.get("SHOT_READER_DATA_DIR")
+    if override:
+        root = Path(override).expanduser()
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+    return Path(__file__).resolve().parent
+
+
+ROOT = resolve_data_root()
 ENV_PATH = ROOT / ".env"
 
 CONFIG_KEYS = [
