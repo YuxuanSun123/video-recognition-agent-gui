@@ -4,6 +4,7 @@ node_modules/
 dist/
 target/
 build/
+release/
 .cache/
 __pycache__/
 *.pyc
