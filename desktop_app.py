@@ -1,5 +1,6 @@
 import ctypes
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -65,11 +66,17 @@ class VideoAgentApp(tk.Tk):
         self.minsize(1220, 780)
         self.configure(bg=COLORS["paper_bg"])
         self._sync_tk_scaling()
+        self.reduce_motion = self._prefers_reduced_motion()
 
         self.report = None
         self.tree_item_map = {}
         self.fields = {}
         self.page_buttons = {}
+        self.pages = {}
+        self.hover_item = None
+        self.drawer_active = False
+        self.drawer_anim_after = None
+        self.drawer_y = 0
         self.local_file = tk.StringVar()
         self.video_url = tk.StringVar()
         self.status = tk.StringVar(value="DASHSCOPE 已连接")
@@ -90,6 +97,16 @@ class VideoAgentApp(tk.Tk):
             self.tk.call("tk", "scaling", scaling)
         except tk.TclError:
             pass
+
+    def _prefers_reduced_motion(self):
+        try:
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Control Panel\Accessibility\Animation") as key:
+                value, _ = winreg.QueryValueEx(key, "Animation")
+            return str(value) == "0"
+        except Exception:
+            return False
 
     def _build_style(self):
         self.option_add("*Font", (FONT_UI, 10))
@@ -125,6 +142,7 @@ class VideoAgentApp(tk.Tk):
             "padding": 8,
         }
         self.style.configure("TEntry", **field_opts)
+        self.style.configure("Focus.TEntry", **{**field_opts, "bordercolor": COLORS["acid"], "lightcolor": COLORS["acid"], "darkcolor": COLORS["acid"], "padding": 10})
         self.style.configure(
             "TCombobox",
             fieldbackground=COLORS["white"],
@@ -135,6 +153,17 @@ class VideoAgentApp(tk.Tk):
             lightcolor=COLORS["line"],
             darkcolor=COLORS["line"],
             padding=8,
+        )
+        self.style.configure(
+            "Focus.TCombobox",
+            fieldbackground=COLORS["white"],
+            background=COLORS["white"],
+            foreground=COLORS["ink"],
+            arrowcolor=COLORS["ink"],
+            bordercolor=COLORS["acid"],
+            lightcolor=COLORS["acid"],
+            darkcolor=COLORS["acid"],
+            padding=10,
         )
         self.style.map(
             "TCombobox",
@@ -201,11 +230,21 @@ class VideoAgentApp(tk.Tk):
         self.page_host.rowconfigure(0, weight=1)
 
         self.workbench = tk.Frame(self.page_host, bg=COLORS["paper"])
+        self.report_page = tk.Frame(self.page_host, bg=COLORS["paper"])
+        self.prompt_page = tk.Frame(self.page_host, bg=COLORS["paper"])
         self.settings_page = tk.Frame(self.page_host, bg=COLORS["paper"])
-        for page in (self.workbench, self.settings_page):
+        self.pages = {
+            "workbench": self.workbench,
+            "reports": self.report_page,
+            "prompts": self.prompt_page,
+            "settings": self.settings_page,
+        }
+        for page in self.pages.values():
             page.grid(row=0, column=0, sticky="nsew")
 
         self._build_workbench()
+        self._build_reports()
+        self._build_prompts()
         self._build_settings()
 
     def _build_sidebar(self):
@@ -215,10 +254,12 @@ class VideoAgentApp(tk.Tk):
         tk.Label(top, text="SHOT READER", bg=COLORS["ink"], fg=COLORS["acid"], font=(FONT_MONO, 8, "bold")).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
         self.page_buttons["workbench"] = self._nav_button("分析任务", lambda: self.show_page("workbench"))
+        self.page_buttons["reports"] = self._nav_button("报告库", lambda: self.show_page("reports"))
+        self.page_buttons["prompts"] = self._nav_button("提示词", lambda: self.show_page("prompts"))
         self.page_buttons["settings"] = self._nav_button("设置与密钥", lambda: self.show_page("settings"))
         self.page_buttons["workbench"].grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 12))
-        self._nav_button("报告库", None).grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 10))
-        self._nav_button("提示词", None).grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 10))
+        self.page_buttons["reports"].grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 10))
+        self.page_buttons["prompts"].grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 10))
         self.page_buttons["settings"].grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 10))
 
         status = tk.Frame(self.sidebar, bg=COLORS["ink"])
@@ -233,7 +274,7 @@ class VideoAgentApp(tk.Tk):
         tk.Label(status, text=f"{cfg.get('vision_model', 'qwen3.7-plus').upper()}\n全栈本地连接\n127.0.0.1:5177", bg=COLORS["ink"], fg="#c4c8c0", font=(FONT_MONO, 8), justify="left").grid(row=2, column=0, sticky="w", pady=(10, 0))
 
     def _nav_button(self, text, command):
-        return tk.Button(
+        button = tk.Button(
             self.sidebar,
             text=text,
             command=command or (lambda: None),
@@ -250,6 +291,10 @@ class VideoAgentApp(tk.Tk):
             highlightbackground=COLORS["ink"],
             font=(FONT_UI, 10, "bold" if command else "normal"),
         )
+        button._active = False
+        button.bind("<Enter>", lambda _event: button.configure(fg=COLORS["acid"], cursor="hand2"))
+        button.bind("<Leave>", lambda _event: button.configure(fg=COLORS["acid"] if getattr(button, "_active", False) else "#c8ccd0"))
+        return button
 
     def _build_rail(self):
         self.rail_canvas = tk.Canvas(
@@ -261,7 +306,11 @@ class VideoAgentApp(tk.Tk):
         )
         self.rail_canvas.pack(fill="both", expand=True)
         self.rail_y = 18
+        self.rail_cycle_ms = 22000
+        self.rail_started_at = time.perf_counter()
         self.rail_text_cache = ""
+        self.rail_canvas.create_line(7, 0, 7, 4000, fill=COLORS["acid"], width=2)
+        self.rail_canvas.create_text(22, 16, text="●", anchor="center", fill=COLORS["acid"], font=(FONT_MONO, 9, "bold"))
         self.rail_text_item = self.rail_canvas.create_text(
             22,
             self.rail_y,
@@ -272,7 +321,8 @@ class VideoAgentApp(tk.Tk):
             justify="center",
         )
         self._refresh_rail_marquee(reset=True)
-        self.after(90, self._tick_rail_marquee)
+        if not self.reduce_motion:
+            self.after(16, self._tick_rail_marquee)
 
     def _bind_rail_sources(self):
         if getattr(self, "_rail_sources_bound", False):
@@ -348,8 +398,21 @@ class VideoAgentApp(tk.Tk):
             self.rail_text_cache = text
             self.rail_canvas.itemconfigure(self.rail_text_item, text=text)
         if reset:
-            self.rail_y = 18
-            self.rail_canvas.coords(self.rail_text_item, 22, self.rail_y)
+            self.rail_started_at = time.perf_counter()
+            self._position_rail_text()
+
+    def _position_rail_text(self):
+        height = max(self.rail_canvas.winfo_height(), 1)
+        bbox = self.rail_canvas.bbox(self.rail_text_item)
+        text_height = (bbox[3] - bbox[1]) if bbox else 320
+        if self.reduce_motion:
+            self.rail_y = 44
+        else:
+            elapsed_ms = (time.perf_counter() - self.rail_started_at) * 1000
+            progress = (elapsed_ms % self.rail_cycle_ms) / self.rail_cycle_ms
+            travel = height + text_height + 28
+            self.rail_y = height + 14 - travel * progress
+        self.rail_canvas.coords(self.rail_text_item, 22, self.rail_y)
 
     def _tick_rail_marquee(self):
         if not hasattr(self, "rail_canvas"):
@@ -358,17 +421,10 @@ class VideoAgentApp(tk.Tk):
             if not self.rail_canvas.winfo_exists():
                 return
             self._refresh_rail_marquee()
-            height = self.rail_canvas.winfo_height()
-            bbox = self.rail_canvas.bbox(self.rail_text_item)
-            if height > 1 and bbox:
-                if bbox[3] < -12:
-                    self.rail_y = height + 12
-                else:
-                    self.rail_y -= 1
-                self.rail_canvas.coords(self.rail_text_item, 22, self.rail_y)
+            self._position_rail_text()
         except tk.TclError:
             return
-        self.after(90, self._tick_rail_marquee)
+        self.after(16, self._tick_rail_marquee)
 
     def _build_header(self):
         header = tk.Frame(self.main, bg=COLORS["paper"])
@@ -386,7 +442,7 @@ class VideoAgentApp(tk.Tk):
         tk.Frame(self.main, bg=COLORS["ink"], height=4).grid(row=1, column=0, sticky="ew", padx=24, pady=(12, 0))
 
     def _header_button(self, parent, text, command, primary=False):
-        return tk.Button(
+        button = tk.Button(
             parent,
             text=text,
             command=command,
@@ -402,14 +458,38 @@ class VideoAgentApp(tk.Tk):
             pady=10,
             font=(FONT_UI, 9, "bold"),
         )
+        self._wire_button_motion(button, primary=primary)
+        return button
+
+    def _wire_button_motion(self, button, primary=False):
+        normal_bg = COLORS["ink"] if primary else COLORS["paper"]
+        normal_fg = COLORS["white"] if primary else COLORS["ink"]
+
+        def hover(_event=None):
+            button.configure(bg=COLORS["acid"], fg=COLORS["ink"], highlightbackground=COLORS["acid"], cursor="hand2")
+
+        def leave(_event=None):
+            button.configure(bg=normal_bg, fg=normal_fg, highlightbackground=COLORS["ink"], relief="flat")
+
+        def press(_event=None):
+            button.configure(bg=COLORS["ink_2"], fg=COLORS["acid"], relief="sunken")
+
+        def release(_event=None):
+            hover()
+
+        button.bind("<Enter>", hover)
+        button.bind("<Leave>", leave)
+        button.bind("<ButtonPress-1>", press)
+        button.bind("<ButtonRelease-1>", release)
 
     def show_page(self, page):
-        self.workbench.grid_remove()
-        self.settings_page.grid_remove()
-        target = self.workbench if page == "workbench" else self.settings_page
+        for page_frame in self.pages.values():
+            page_frame.grid_remove()
+        target = self.pages.get(page, self.workbench)
         target.grid(row=0, column=0, sticky="nsew")
         for key, button in self.page_buttons.items():
             active = key == page
+            button._active = active
             button.configure(
                 fg=COLORS["acid"] if active else "#c8ccd0",
                 highlightbackground=COLORS["acid"] if active else COLORS["ink"],
@@ -418,13 +498,54 @@ class VideoAgentApp(tk.Tk):
 
     def _build_workbench(self):
         self.workbench.columnconfigure(0, weight=1)
-        self.workbench.rowconfigure(1, weight=1)
+        self.workbench.rowconfigure(0, weight=1)
 
-        setup = self._section(self.workbench, "1", "输入设置 · SETUP", "配置视频与分析参数")
-        setup.grid(row=0, column=0, sticky="ew")
-        setup.body.columnconfigure(0, weight=1)
+        self.analysis_stage = tk.Frame(self.workbench, bg=COLORS["paper"], highlightthickness=2, highlightbackground=COLORS["ink"])
+        self.analysis_stage.grid(row=0, column=0, sticky="nsew")
+        self.analysis_stage.bind("<Configure>", self._layout_drawers)
 
-        hero = tk.Frame(setup.body, bg=COLORS["ink"])
+        self.input_panel = self._section(self.analysis_stage, "1", "输入设置 · SETUP", "报告封面 + 印刷表单网格")
+        self.input_panel.place(x=0, y=0, relwidth=1, relheight=1)
+        self._build_input_panel(self.input_panel.body)
+
+        self.input_handle = self._drawer_handle(
+            self.analysis_stage,
+            "1",
+            "输入设置",
+            "返回报告封面与表单",
+            "▲",
+            self.show_input_drawer,
+        )
+        self.input_handle.place(x=0, y=-56, relwidth=1, height=54)
+
+        self.result_drawer = tk.Frame(self.analysis_stage, bg=COLORS["paper"], highlightthickness=2, highlightbackground=COLORS["ink"])
+        self.result_drawer.columnconfigure(0, weight=1)
+        self.result_drawer.rowconfigure(1, weight=1)
+        self.result_handle = self._drawer_handle(
+            self.result_drawer,
+            "2",
+            "逐镜结果 · RESULT",
+            "筛选条 + 逐镜表格 + 完整字段",
+            "▲",
+            self.toggle_result_drawer,
+            result=True,
+        )
+        self.result_handle.grid(row=0, column=0, sticky="ew")
+        self.result_body = tk.Frame(self.result_drawer, bg=COLORS["paper"])
+        self.result_body.grid(row=1, column=0, sticky="nsew")
+        self.result_body.columnconfigure(0, weight=1)
+        self.result_body.rowconfigure(1, weight=1)
+        self._build_result_area(self.result_body)
+        self.result_drawer.place(x=0, y=0, relwidth=1, height=60)
+
+        self.after(60, self._layout_drawers)
+        self._bind_rail_sources()
+
+    def _build_input_panel(self, parent):
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
+
+        hero = tk.Frame(parent, bg=COLORS["ink"])
         hero.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 14))
         hero.columnconfigure(0, weight=1)
         hero.columnconfigure(1, weight=1)
@@ -441,13 +562,13 @@ class VideoAgentApp(tk.Tk):
 
         preview_wrap = tk.Frame(hero, bg=COLORS["acid"], padx=3, pady=3)
         preview_wrap.grid(row=0, column=1, sticky="nsew", padx=(14, 22), pady=20)
-        preview = tk.Frame(preview_wrap, bg="#171c24")
+        preview = tk.Canvas(preview_wrap, bg="#171c24", highlightthickness=0, height=168)
         preview.grid(row=0, column=0, sticky="nsew")
         preview_wrap.columnconfigure(0, weight=1)
         preview_wrap.rowconfigure(0, weight=1)
-        tk.Label(preview, text="▶  等待视频 URL", bg="#171c24", fg="#cdd2d7", font=(FONT_MONO, 9, "bold")).place(relx=0.5, rely=0.5, anchor="center")
+        self._draw_preview_corners(preview)
 
-        form = tk.Frame(setup.body, bg=COLORS["paper"], highlightthickness=2, highlightbackground=COLORS["ink"])
+        form = tk.Frame(parent, bg=COLORS["paper"], highlightthickness=2, highlightbackground=COLORS["ink"])
         form.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 16))
         for col in range(6):
             form.columnconfigure(col, weight=1)
@@ -474,28 +595,47 @@ class VideoAgentApp(tk.Tk):
         self._field(form, "字幕 / 音轨转写", 4, 0, colspan=3, widget=self.subtitle_text)
         self._field(form, "补充分析要求", 4, 3, colspan=3, widget=self.custom_prompt)
 
-        result = self._section(self.workbench, "2", "逐镜结果 · RESULT", "点击单行查看完整字段")
-        result.grid(row=1, column=0, sticky="nsew", pady=(14, 0))
-        result.body.columnconfigure(0, weight=1)
-        result.body.rowconfigure(0, weight=1)
-        self._build_result_area(result.body)
-        self._bind_rail_sources()
-
     def _build_result_area(self, parent):
+        filter_bar = tk.Frame(parent, bg=COLORS["paper"], highlightthickness=0)
+        filter_bar.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
+        filter_bar.columnconfigure(1, weight=1)
+        tk.Label(filter_bar, text="FILTER", bg=COLORS["ink"], fg=COLORS["acid"], font=(FONT_MONO, 8, "bold"), padx=10, pady=6).grid(row=0, column=0, sticky="w")
+        self.result_filter = tk.StringVar()
+        filter_entry = tk.Entry(
+            filter_bar,
+            textvariable=self.result_filter,
+            bg=COLORS["white"],
+            fg=COLORS["ink"],
+            insertbackground=COLORS["ink"],
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=COLORS["ink"],
+            highlightcolor=COLORS["acid"],
+            font=(FONT_UI, 10),
+        )
+        filter_entry.grid(row=0, column=1, sticky="ew", padx=(10, 8), ipady=8)
+        self._bind_focus_effect(filter_entry)
+        clear_button = self._header_button(filter_bar, "清除", lambda: self.result_filter.set(""))
+        clear_button.grid(row=0, column=2, sticky="e")
+        self.result_count_var = tk.StringVar(value="00 镜")
+        tk.Label(filter_bar, textvariable=self.result_count_var, bg=COLORS["paper"], fg=COLORS["muted"], font=(FONT_MONO, 8, "bold")).grid(row=0, column=3, sticky="e", padx=(12, 0))
+        self.result_filter.trace_add("write", lambda *_: self.render_report())
+
         table_wrap = tk.Frame(parent, bg=COLORS["ink"], padx=2, pady=2)
-        table_wrap.grid(row=0, column=0, sticky="nsew", padx=16, pady=16)
+        table_wrap.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 12))
         table_wrap.columnconfigure(0, weight=1)
         table_wrap.rowconfigure(0, weight=1)
 
         self.tree = ttk.Treeview(
             table_wrap,
             style="Overprint.Treeview",
-            columns=("shot", "timecode", "size", "camera", "visual", "audio", "analysis"),
+            columns=("thumb", "shot", "timecode", "size", "camera", "visual", "audio", "analysis"),
             show="headings",
             selectmode="browse",
-            height=7,
+            height=12,
         )
         columns = {
+            "thumb": ("截图", 74),
             "shot": ("镜号", 78),
             "timecode": ("时间码", 112),
             "size": ("景别", 80),
@@ -506,7 +646,8 @@ class VideoAgentApp(tk.Tk):
         }
         for key, (label, width) in columns.items():
             self.tree.heading(key, text=label)
-            self.tree.column(key, width=width, minwidth=width, anchor="w", stretch=key in {"visual", "analysis"})
+            anchor = "center" if key in {"thumb", "shot"} else "w"
+            self.tree.column(key, width=width, minwidth=width, anchor=anchor, stretch=key in {"visual", "analysis"})
         y_scroll = ttk.Scrollbar(table_wrap, orient="vertical", command=self.tree.yview)
         x_scroll = ttk.Scrollbar(table_wrap, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
@@ -515,23 +656,196 @@ class VideoAgentApp(tk.Tk):
         x_scroll.grid(row=1, column=0, sticky="ew")
         self.tree.tag_configure("even", background=COLORS["paper_2"])
         self.tree.tag_configure("odd", background="#eee8d9")
+        self.tree.tag_configure("hover", background="#fff4bf")
         self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
+        self.tree.bind("<Motion>", self.on_tree_motion)
+        self.tree.bind("<Leave>", self.clear_tree_hover)
 
         self.detail_text = self._text_box(parent, height=8, bg=COLORS["white"])
-        self.detail_text.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 16))
+        self.detail_text.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 16))
         self._set_text(self.detail_text, "分析完成后，点击任意镜头查看完整字段。")
+
+    def _draw_preview_corners(self, canvas):
+        def redraw(_event=None):
+            canvas.delete("preview")
+            w = max(canvas.winfo_width(), 320)
+            h = max(canvas.winfo_height(), 160)
+            length = 46
+            pad = 16
+            for x1, y1, x2, y2 in (
+                (pad, pad, pad + length, pad),
+                (pad, pad, pad, pad + length),
+                (w - pad - length, pad, w - pad, pad),
+                (w - pad, pad, w - pad, pad + length),
+                (pad, h - pad, pad + length, h - pad),
+                (pad, h - pad - length, pad, h - pad),
+                (w - pad - length, h - pad, w - pad, h - pad),
+                (w - pad, h - pad - length, w - pad, h - pad),
+            ):
+                canvas.create_line(x1, y1, x2, y2, fill=COLORS["acid"], width=3, tags="preview")
+            canvas.create_text(w / 2, h / 2 - 8, text="套印角框预览位", fill="#d8ddd2", font=(FONT_UI, 12, "bold"), tags="preview")
+            canvas.create_text(w / 2, h / 2 + 18, text="等待视频 URL / 截图", fill="#8f9791", font=(FONT_MONO, 8, "bold"), tags="preview")
+
+        canvas.bind("<Configure>", redraw)
+        canvas.after(40, redraw)
+
+    def _drawer_handle(self, parent, number, title, right_text, arrow, command, result=False):
+        handle = tk.Frame(parent, bg=COLORS["ink"], height=54)
+        handle.columnconfigure(2, weight=1)
+        number_label = tk.Label(handle, text=number, bg=COLORS["paper_2"], fg=COLORS["ink"], font=(FONT_MONO, 9, "bold"), padx=9, pady=4)
+        number_label.grid(row=0, column=0, sticky="w", padx=(16, 10), pady=12)
+        title_label = tk.Label(handle, text=title, bg=COLORS["ink"], fg=COLORS["acid"], font=(FONT_MONO, 8, "bold"))
+        title_label.grid(row=0, column=1, sticky="w")
+        right_label = tk.Label(handle, text=right_text, bg=COLORS["ink"], fg="#b7bbb4", font=(FONT_UI, 8))
+        right_label.grid(row=0, column=2, sticky="e", padx=(16, 10))
+        arrow_label = tk.Label(handle, text=arrow, bg=COLORS["ink"], fg=COLORS["acid"], font=(FONT_MONO, 12, "bold"), width=3)
+        arrow_label.grid(row=0, column=3, sticky="e", padx=(0, 14))
+
+        def trigger(_event=None):
+            command()
+
+        for widget in (handle, number_label, title_label, right_label, arrow_label):
+            widget.bind("<Button-1>", trigger)
+            widget.bind("<Enter>", lambda _event, w=handle: w.configure(cursor="hand2"))
+        handle.number_label = number_label
+        handle.arrow_label = arrow_label
+        handle.is_result_handle = result
+        return handle
+
+    def _target_result_y(self, active=None):
+        active = self.drawer_active if active is None else active
+        height = max(self.analysis_stage.winfo_height(), 120)
+        return 54 if active else max(height - 58, 54)
+
+    def _layout_drawers(self, _event=None):
+        if not hasattr(self, "result_drawer"):
+            return
+        if self.drawer_anim_after is None:
+            self.drawer_y = self._target_result_y()
+        self._place_drawer()
+
+    def _place_drawer(self):
+        width = max(self.analysis_stage.winfo_width(), 1)
+        height = max(self.analysis_stage.winfo_height(), 120)
+        y = int(round(self.drawer_y))
+        self.result_drawer.place_configure(x=0, y=y, width=width, height=max(height - y, 58))
+        if self.drawer_active:
+            self.input_handle.place_configure(y=0, height=54, width=width)
+        else:
+            self.input_handle.place_configure(y=-56, height=54, width=width)
+        self._update_drawer_handle_state()
+
+    def _update_drawer_handle_state(self):
+        if not hasattr(self, "result_handle"):
+            return
+        active_bg = COLORS["acid"] if self.drawer_active else COLORS["paper_2"]
+        self.result_handle.number_label.configure(bg=active_bg, fg=COLORS["ink"])
+        self.result_handle.arrow_label.configure(text="▼" if self.drawer_active else "▲")
+        self.input_handle.number_label.configure(bg=COLORS["acid"] if self.drawer_active else COLORS["paper_2"])
+
+    def toggle_result_drawer(self):
+        if self.drawer_active:
+            self.show_input_drawer()
+        else:
+            self.show_result_drawer()
+
+    def show_result_drawer(self):
+        self._animate_drawer(True)
+
+    def show_input_drawer(self):
+        self._animate_drawer(False)
+
+    def _animate_drawer(self, active):
+        if not hasattr(self, "analysis_stage"):
+            return
+        if self.drawer_anim_after is not None:
+            self.after_cancel(self.drawer_anim_after)
+            self.drawer_anim_after = None
+        start_y = self.drawer_y or self._target_result_y(self.drawer_active)
+        end_y = self._target_result_y(active)
+        self.drawer_active = active
+        if self.reduce_motion:
+            self.drawer_y = end_y
+            self._place_drawer()
+            return
+        started_at = time.perf_counter()
+        duration = 0.42
+
+        def step():
+            elapsed = time.perf_counter() - started_at
+            progress = min(elapsed / duration, 1)
+            eased = self._ease_mechanical(progress)
+            self.drawer_y = start_y + (end_y - start_y) * eased
+            self._place_drawer()
+            if progress < 1:
+                self.drawer_anim_after = self.after(16, step)
+            else:
+                self.drawer_y = end_y
+                self.drawer_anim_after = None
+                self._place_drawer()
+
+        step()
+
+    def _ease_mechanical(self, progress):
+        progress = max(0, min(progress, 1))
+        return 1 - pow(1 - progress, 3)
+
+    def _build_reports(self):
+        self.report_page.columnconfigure(0, weight=1)
+        self.report_page.rowconfigure(0, weight=1)
+        section = self._section(self.report_page, "A", "报告库 · LIBRARY", "当前会话报告与导出入口")
+        section.grid(row=0, column=0, sticky="nsew")
+        section.body.columnconfigure(0, weight=1)
+        section.body.rowconfigure(1, weight=1)
+
+        tools = tk.Frame(section.body, bg=COLORS["paper"])
+        tools.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 10))
+        tools.columnconfigure(0, weight=1)
+        tk.Label(tools, text="当前报告", bg=COLORS["paper"], fg=COLORS["ink"], font=(FONT_UI, 14, "bold")).grid(row=0, column=0, sticky="w")
+        self._header_button(tools, "导出 MD", self.export_markdown_file).grid(row=0, column=1, sticky="e", padx=(0, 8))
+        self._header_button(tools, "导出 CSV", self.export_csv_file).grid(row=0, column=2, sticky="e")
+
+        self.report_library_text = self._text_box(section.body, height=18, bg=COLORS["white"])
+        self.report_library_text.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 16))
+        self._set_text(self.report_library_text, "还没有报告。完成一次分析后，这里会显示报告封面、场景数量、镜头数量和分析依据。")
+
+    def _build_prompts(self):
+        self.prompt_page.columnconfigure(0, weight=1)
+        self.prompt_page.rowconfigure(0, weight=1)
+        section = self._section(self.prompt_page, "B", "提示词 · PROMPTS", "分析口径与补充要求模板")
+        section.grid(row=0, column=0, sticky="nsew")
+        section.body.columnconfigure(0, weight=1)
+        section.body.rowconfigure(1, weight=1)
+
+        tk.Label(section.body, text="可把下面的片段复制到「补充分析要求」里，作为单次任务的导演口径。", bg=COLORS["paper"], fg=COLORS["muted"], font=(FONT_UI, 10)).grid(row=0, column=0, sticky="w", padx=16, pady=(16, 8))
+        self.prompt_library_text = self._text_box(section.body, height=20, bg=COLORS["white"])
+        self.prompt_library_text.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 16))
+        prompt_text = "\n\n".join(
+            [
+                "电影学院拉片：重点分析构图、景别、镜头运动、空间关系、色彩、叙事功能与转折点。",
+                "声音/对白专精：重点识别对白、环境声、音乐进入/退出、声画关系，以及声音如何改变观众对人物的判断。",
+                "剪辑节奏：请标出镜头切换依据、动作段落、情绪转折和长镜头内部调度。",
+                "输出约束：保持 JSON 字段稳定，visual 只写画面内容，audio 只写声音/字幕，analysis 只写电影语言注释。",
+            ]
+        )
+        self._set_text(self.prompt_library_text, prompt_text)
 
     def _build_settings(self):
         self.settings_page.columnconfigure(0, weight=1)
+        self.settings_page.rowconfigure(0, weight=1)
         section = self._section(self.settings_page, "3", "设置与密钥 · KEYS", "留空密钥字段会保留原值")
         section.grid(row=0, column=0, sticky="nsew")
         section.body.columnconfigure(0, weight=1)
         section.body.rowconfigure(0, weight=1)
 
-        form = tk.Frame(section.body, bg=COLORS["paper"], highlightthickness=2, highlightbackground=COLORS["ink"])
-        form.grid(row=0, column=0, sticky="nsew", padx=16, pady=16)
+        scroll_shell, scroll_body = self._scrollable_frame(section.body)
+        scroll_shell.grid(row=0, column=0, sticky="nsew", padx=16, pady=16)
+
+        form = tk.Frame(scroll_body, bg=COLORS["paper"], highlightthickness=2, highlightbackground=COLORS["ink"])
+        form.grid(row=0, column=0, sticky="nsew")
         form.columnconfigure(0, weight=1)
         form.columnconfigure(1, weight=1)
+        scroll_body.columnconfigure(0, weight=1)
         rows = [
             ("dashscope_api_key", "DASHSCOPE_API_KEY", True),
             ("workspace_id", "Workspace ID", False),
@@ -554,11 +868,39 @@ class VideoAgentApp(tk.Tk):
             var = tk.StringVar()
             entry = ttk.Entry(form, textvariable=var, show="*" if secret else "")
             entry.grid(row=row + 1, column=col, sticky="ew", padx=padx, pady=(0, 4))
+            self._bind_focus_effect(entry)
             self.fields[key] = var
 
         self.secret_note = tk.StringVar(value="")
         tk.Label(form, textvariable=self.secret_note, bg=COLORS["paper"], fg=COLORS["muted"], font=(FONT_MONO, 8)).grid(row=12, column=0, columnspan=2, sticky="w", padx=14, pady=(18, 8))
         self._header_button(form, "保存配置", self.save_settings, primary=True).grid(row=13, column=1, sticky="e", padx=14, pady=(8, 18))
+
+    def _scrollable_frame(self, parent):
+        outer = tk.Frame(parent, bg=COLORS["paper"], highlightthickness=2, highlightbackground=COLORS["ink"])
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(0, weight=1)
+        canvas = tk.Canvas(outer, bg=COLORS["paper"], highlightthickness=0, bd=0)
+        scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        content = tk.Frame(canvas, bg=COLORS["paper"])
+        window_id = canvas.create_window((0, 0), window=content, anchor="nw")
+
+        def update_region(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def update_width(event):
+            canvas.itemconfigure(window_id, width=event.width)
+
+        def on_wheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        content.bind("<Configure>", update_region)
+        canvas.bind("<Configure>", update_width)
+        canvas.bind("<Enter>", lambda _event: canvas.bind_all("<MouseWheel>", on_wheel))
+        canvas.bind("<Leave>", lambda _event: canvas.unbind_all("<MouseWheel>"))
+        return outer, content
 
     def _section(self, parent, number, title, right_text):
         outer = tk.Frame(parent, bg=COLORS["paper"], highlightthickness=2, highlightbackground=COLORS["ink"])
@@ -584,9 +926,10 @@ class VideoAgentApp(tk.Tk):
     def _field(self, parent, label, row, col, widget, colspan=1):
         tk.Label(parent, text=label, bg=COLORS["paper"], fg=COLORS["ink"], font=(FONT_MONO, 8, "bold")).grid(row=row, column=col, columnspan=colspan, sticky="w", padx=14, pady=(14, 4))
         widget.grid(row=row + 1, column=col, columnspan=colspan, sticky="ew", padx=14, pady=(0, 10))
+        self._bind_focus_effect(widget)
 
     def _text_box(self, parent, height=4, bg=None):
-        return tk.Text(
+        widget = tk.Text(
             parent,
             height=height,
             wrap="word",
@@ -604,6 +947,32 @@ class VideoAgentApp(tk.Tk):
             highlightcolor=COLORS["acid"],
             font=(FONT_UI, 10),
         )
+        self._bind_focus_effect(widget)
+        return widget
+
+    def _bind_focus_effect(self, widget):
+        if isinstance(widget, ttk.Entry):
+            widget.bind("<FocusIn>", lambda _event: widget.configure(style="Focus.TEntry"))
+            widget.bind("<FocusOut>", lambda _event: widget.configure(style="TEntry"))
+            return
+        if isinstance(widget, ttk.Combobox):
+            widget.bind("<FocusIn>", lambda _event: widget.configure(style="Focus.TCombobox"))
+            widget.bind("<FocusOut>", lambda _event: widget.configure(style="TCombobox"))
+            return
+        if isinstance(widget, (tk.Entry, tk.Text)):
+            widget.bind("<FocusIn>", lambda _event: widget.configure(highlightthickness=3, highlightbackground=COLORS["acid"], highlightcolor=COLORS["acid"]))
+            widget.bind("<FocusOut>", lambda _event: widget.configure(highlightthickness=1, highlightbackground=COLORS["ink"], highlightcolor=COLORS["acid"]))
+            return
+        if isinstance(widget, tk.Frame):
+            def focus_frame(_event=None):
+                widget.configure(highlightthickness=3, highlightbackground=COLORS["acid"])
+
+            def blur_frame(_event=None):
+                widget.configure(highlightthickness=1, highlightbackground=COLORS["ink"])
+
+            for child in widget.winfo_children():
+                child.bind("<FocusIn>", focus_frame, add="+")
+                child.bind("<FocusOut>", blur_frame, add="+")
 
     def _set_text(self, widget, value):
         widget.configure(state="normal")
@@ -656,6 +1025,7 @@ class VideoAgentApp(tk.Tk):
         self.set_status("GitHub URL 已填入")
 
     def start_analysis(self):
+        self.show_result_drawer()
         inputs = {
             "mode": self.upload_mode_value(),
             "video_url": self.video_url.get().strip(),
@@ -722,16 +1092,50 @@ class VideoAgentApp(tk.Tk):
         self.shot_count_var.set(f"{int(meta.get('shotCount') or len(shots)):02d}")
         self.task_mode_var.set("LIVE")
         self.render_report()
+        self.update_report_library()
+        self.show_result_drawer()
+
+    def update_report_library(self):
+        if not hasattr(self, "report_library_text"):
+            return
+        if not self.report:
+            self._set_text(self.report_library_text, "还没有报告。完成一次分析后，这里会显示报告封面、场景数量、镜头数量和分析依据。")
+            return
+        meta = self.report.get("meta", {})
+        lines = [
+            f"片名：{meta.get('title') or '未命名报告'}",
+            f"集数/片段：{meta.get('episode') or '未提供'}",
+            f"片长：{meta.get('duration') or '片长待识别'}",
+            f"场景数：{meta.get('sceneCount') or 0}",
+            f"镜头数：{meta.get('shotCount') or len(self.report.get('shots', []))}",
+            f"分析依据：{meta.get('basis') or '视觉理解分析'}",
+            "",
+            "导出：可使用右上角或本页按钮导出 Markdown / CSV。",
+        ]
+        self._set_text(self.report_library_text, "\n".join(lines))
 
     def render_report(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
         self.tree_item_map = {}
-        for index, shot in enumerate(self.report.get("shots", [])):
+        self.hover_item = None
+        shots = self.report.get("shots", []) if self.report else []
+        query = self.result_filter.get().strip().lower() if hasattr(self, "result_filter") else ""
+        if query:
+            shots = [
+                shot
+                for shot in shots
+                if query
+                in " ".join(str(value or "") for value in shot.values()).lower()
+            ]
+        if hasattr(self, "result_count_var"):
+            self.result_count_var.set(f"{len(shots):02d} 镜")
+        for index, shot in enumerate(shots):
             item = self.tree.insert(
                 "",
                 "end",
                 values=(
+                    shot.get("screenshot") or shot.get("thumbnail") or "▧",
                     shot.get("shot", ""),
                     shot.get("timecode", ""),
                     shot.get("shotSize", ""),
@@ -758,6 +1162,22 @@ class VideoAgentApp(tk.Tk):
         shot = self.tree_item_map.get(selection[0])
         if shot:
             self.update_detail(shot)
+
+    def on_tree_motion(self, event):
+        item = self.tree.identify_row(event.y)
+        if item == self.hover_item:
+            return
+        self.clear_tree_hover()
+        if item:
+            tags = tuple(tag for tag in self.tree.item(item, "tags") if tag != "hover")
+            self.tree.item(item, tags=tags + ("hover",))
+            self.hover_item = item
+
+    def clear_tree_hover(self, _event=None):
+        if self.hover_item and self.tree.exists(self.hover_item):
+            tags = tuple(tag for tag in self.tree.item(self.hover_item, "tags") if tag != "hover")
+            self.tree.item(self.hover_item, tags=tags)
+        self.hover_item = None
 
     def update_detail(self, shot):
         lines = [
