@@ -1,16 +1,27 @@
 {
-  "name": "video-shot-report-platform",
-  "version": "0.1.0",
-  "description": "A lightweight platform for video shot-by-shot analysis reports powered by Aliyun Model Studio vision APIs.",
+  "name": "shot-reader-tauri",
+  "version": "0.2.0",
+  "description": "Desktop shot-by-shot video analysis app powered by DashScope, React, FastAPI, and Tauri.",
   "type": "module",
   "scripts": {
-    "dev": "node --watch server.mjs",
-    "start": "node server.mjs"
-  },
-  "engines": {
-    "node": ">=20"
+    "backend": "py -m uvicorn backend_api:app --host 127.0.0.1 --port 8765 --reload",
+    "dev:frontend": "vite --host 127.0.0.1 --port 5177",
+    "dev": "concurrently -k -n backend,frontend -c cyan,green \"npm:backend\" \"npm:dev:frontend\"",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 5177",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "legacy:node": "node server.mjs",
+    "legacy:gui": "py desktop_app.py"
   },
   "dependencies": {
-    "ali-oss": "^6.23.0"
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.7",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.2.5",
+    "concurrently": "^9.1.2"
   }
 }

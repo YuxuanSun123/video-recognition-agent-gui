@@ -2,11 +2,12 @@
 
 一个面向影视拉片、视频审阅和多模态分析的原生桌面工具。它可以调用阿里云百炼 / DashScope 的 Qwen 视频理解和音频专精模型，把视频分析成逐镜报告，并导出 Markdown 或 CSV。
 
-当前主入口是原生 Windows GUI，不是浏览器页面或 HTML 外壳。
+当前主入口正在迁移为 `Tauri + React/Vite + Python FastAPI sidecar`：界面采用之前 HTML 版本的套印报表风格和抽屉动画，底层继续复用现有 DashScope / GitHub Releases 核心逻辑。旧版 Tkinter GUI 仍保留为备用入口。
 
 ## 功能特性
 
-- 原生 Tkinter 桌面工作台：左侧配置任务，右侧查看逐镜表格和镜头详情。
+- Tauri 桌面壳 + React 工作台：左侧书脊导航、竖排走马灯状态、输入设置 / 逐镜结果叠加抽屉。
+- Python FastAPI 本地 sidecar：负责保存配置、上传 GitHub Releases、调用 DashScope、生成本地缩略图。
 - 支持阿里云百炼 / DashScope API Key 本地保存。
 - 支持本地视频路径分析：走 DashScope Python SDK，单个视频不超过 100MB。
 - 支持公网 URL 分析：走 OpenAI 兼容接口的 `video_url`。
@@ -22,10 +23,14 @@
 
 ```text
 .
-├── desktop_app.py           # 原生桌面 GUI
+├── src/                     # React / Vite 新工作台
+├── src-tauri/               # Tauri 桌面壳
+├── backend_api.py           # FastAPI 本地 sidecar
+├── desktop_app.py           # 旧版 Tkinter GUI，保留作备用
 ├── video_agent_core.py      # 配置、API 调用、上传、解析、导出核心逻辑
 ├── start_gui.cmd            # Windows 双击启动脚本
 ├── requirements.txt         # Python 依赖
+├── package.json             # 前端 / Tauri 脚本
 ├── server.mjs               # 旧版本地网页服务，保留作备用
 ├── public/                  # 旧版网页界面
 └── scripts/                 # DashScope 本地路径辅助脚本
@@ -33,26 +38,43 @@
 
 ## 安装
 
-需要 Windows + Python 3.10 或更新版本。
+需要 Windows + Python 3.10 或更新版本、Node.js，以及 Rust / Tauri 构建环境。
 
 ```powershell
 py -m pip install -r requirements.txt
+npm install
 ```
 
-Tkinter 是 Windows Python 通常自带的标准 GUI 库，不需要额外安装。
+如果只跑前端和本地 API，不需要先打包 exe；开发模式会同时启动 FastAPI 和 Vite。
 
 ## 启动
 
-方式一，双击：
+新架构开发模式：
+
+```powershell
+npm run dev
+```
+
+然后打开：
+
+```text
+http://127.0.0.1:5177
+```
+
+Tauri 桌面壳开发模式：
+
+```powershell
+npm run tauri:dev
+```
+
+旧版 Tkinter 备用入口：
 
 ```text
 start_gui.cmd
 ```
 
-方式二，命令行启动：
-
 ```powershell
-py desktop_app.py
+npm run legacy:gui
 ```
 
 ## 配置
@@ -118,22 +140,22 @@ DASHSCOPE_BASE_URL=https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible
 - https://help.aliyun.com/zh/model-studio/vision
 - https://help.aliyun.com/zh/model-studio/qwen-omni
 
-## 旧版网页入口
+## 旧版入口
 
-旧版网页平台仍保留：
+旧版 Node 网页服务和 Tkinter GUI 仍保留作备用：
 
 ```powershell
-npm install
-npm start
+npm run legacy:node
+npm run legacy:gui
 ```
 
-然后打开：
+旧版网页服务打开：
 
 ```text
 http://localhost:5177
 ```
 
-当前推荐使用 `desktop_app.py` 或 `start_gui.cmd` 启动原生 GUI。
+当前推荐优先使用 `npm run dev` 或 `npm run tauri:dev` 进入新工作台。
 
 ## 安全说明
 

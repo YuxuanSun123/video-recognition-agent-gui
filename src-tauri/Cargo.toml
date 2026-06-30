@@ -1,0 +1,18 @@
+[package]
+name = "shot-reader"
+version = "0.2.0"
+description = "Shot Reader desktop app"
+authors = ["Shot Reader"]
+license = ""
+repository = ""
+edition = "2021"
+
+[lib]
+name = "shot_reader_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.3", features = [] }

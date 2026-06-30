@@ -1,0 +1,535 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { createRoot } from "react-dom/client";
+import "./styles.css";
+
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8765";
+
+const emptyReport = {
+  meta: {
+    title: "样例短片 · 逐镜拉片报告",
+    duration: "片长待识别",
+    sceneCount: 0,
+    shotCount: 0,
+    basis: "等待分析",
+  },
+  shots: [],
+};
+
+const demoShots = [
+  {
+    shot: "SHOT-001",
+    timecode: "00:00:00-00:00:06",
+    shotSize: "全景",
+    camera: "固定",
+    visual: "城市清晨，主角推门走出公寓，街道空旷。",
+    audio: "环境底噪 + 低频 pad",
+    analysis: "建立空间，冷色调铺陈孤独感。",
+  },
+  {
+    shot: "SHOT-002",
+    timecode: "00:00:06-00:00:11",
+    shotSize: "中景",
+    camera: "缓推",
+    visual: "主角整理衣领，目光投向画面外。",
+    audio: "脚步声 + 渐入弦乐",
+    analysis: "推镜强调心理压力，注意力收束。",
+  },
+  {
+    shot: "SHOT-003",
+    timecode: "00:00:11-00:00:15",
+    shotSize: "特写",
+    camera: "手持",
+    visual: "手指敲击桌面，节奏逐渐加快。",
+    audio: "鼓点节拍 · 无对白",
+    analysis: "手持制造不安，剪辑提速。",
+  },
+  {
+    shot: "SHOT-004",
+    timecode: "00:00:15-00:00:22",
+    shotSize: "近景",
+    camera: "横摇",
+    visual: "对话开始，反打两位人物。",
+    audio: "对白 + 室内混响",
+    analysis: "正反打建立对峙关系。",
+  },
+];
+
+function App() {
+  const [tab, setTab] = useState("analysis");
+  const [drawer, setDrawer] = useState("setup");
+  const [status, setStatus] = useState("DASHSCOPE 连接中");
+  const [health, setHealth] = useState(null);
+  const [settings, setSettings] = useState({});
+  const [report, setReport] = useState(emptyReport);
+  const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [form, setForm] = useState({
+    videoUrl: "",
+    title: "逐镜拉片报告",
+    fps: "1",
+    analysisMode: "vision",
+    uploadMode: "local",
+    subtitleText: "",
+    customPrompt: "",
+  });
+  const [file, setFile] = useState(null);
+
+  useEffect(() => {
+    refreshHealth();
+    loadSettings();
+  }, []);
+
+  const shots = report.shots?.length ? report.shots : demoShots;
+  const meta = report.meta || emptyReport.meta;
+  const shownShots = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return shots;
+    return shots.filter((shot) =>
+      Object.values(shot).join(" ").toLowerCase().includes(q),
+    );
+  }, [shots, filter]);
+
+  async function refreshHealth() {
+    try {
+      const data = await request("/api/health");
+      setHealth(data);
+      setStatus(data.dashscope ? "DASHSCOPE 已连接" : "等待保存 API Key");
+    } catch (error) {
+      setStatus("本地后端未连接");
+    }
+  }
+
+  async function loadSettings() {
+    try {
+      setSettings(await request("/api/config"));
+    } catch {
+      setSettings({});
+    }
+  }
+
+  function updateForm(key, value) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function runAnalyze() {
+    setDrawer("result");
+    setBusy(true);
+    setStatus("正在分析视频");
+    const body = new FormData();
+    body.set("mode", form.uploadMode);
+    body.set("title", form.title);
+    body.set("video_url", form.videoUrl);
+    body.set("analysis_mode", form.analysisMode);
+    body.set("fps", form.fps);
+    body.set("subtitle_text", form.subtitleText);
+    body.set("custom_prompt", form.customPrompt);
+    if (file) body.set("file", file);
+    try {
+      const data = await request("/api/analyze", { method: "POST", body });
+      setReport(data.report);
+      setStatus(`分析完成：${data.report?.shots?.length || 0} 镜`);
+    } catch (error) {
+      setStatus(`错误：${error.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function uploadGithub() {
+    if (!file) {
+      setStatus("请先选择本地视频");
+      return;
+    }
+    setBusy(true);
+    setStatus("正在上传 GitHub Release");
+    const body = new FormData();
+    body.set("file", file);
+    try {
+      const data = await request("/api/upload/github", { method: "POST", body });
+      updateForm("videoUrl", data.url);
+      updateForm("uploadMode", "url");
+      setStatus("GitHub URL 已填入");
+    } catch (error) {
+      setStatus(`上传失败：${error.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveSettings() {
+    setBusy(true);
+    setStatus("正在保存配置");
+    try {
+      const data = await request("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      });
+      setSettings(data);
+      setStatus("配置已保存");
+      refreshHealth();
+    } catch (error) {
+      setStatus(`保存失败：${error.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function exportMarkdown() {
+    if (!report.shots?.length) return;
+    const lines = [
+      `# ${meta.title || "逐镜拉片报告"}`,
+      "",
+      `- 片长：${meta.duration || ""}`,
+      `- 场景数：${meta.sceneCount || 0}`,
+      `- 镜头数：${meta.shotCount || report.shots.length}`,
+      `- 分析依据：${meta.basis || ""}`,
+      "",
+      "| 镜号 | 时间码 | 景别 | 镜头运动 | 画面内容 / 人物动作 | 分析注释 | 声音 / 音乐 |",
+      "|---|---|---|---|---|---|---|",
+      ...report.shots.map((shot) =>
+        [
+          shot.shot,
+          shot.timecode,
+          shot.shotSize,
+          shot.camera,
+          shot.visual,
+          shot.analysis,
+          shot.audio,
+        ]
+          .map((value) => String(value || "").replaceAll("|", "\\|"))
+          .join(" | "),
+      ).map((row) => `| ${row} |`),
+    ];
+    downloadText(`${meta.title || "shot-report"}.md`, lines.join("\n"), "text/markdown");
+  }
+
+  function exportCsv() {
+    if (!report.shots?.length) return;
+    const header = ["镜号", "时间码", "景别", "镜头运动", "画面内容 / 人物动作", "分析注释", "声音 / 音乐"];
+    const rows = report.shots.map((shot) => [
+      shot.shot,
+      shot.timecode,
+      shot.shotSize,
+      shot.camera,
+      shot.visual,
+      shot.analysis,
+      shot.audio,
+    ]);
+    const csv = [header, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell || "").replaceAll('"', '""')}"`).join(","))
+      .join("\n");
+    downloadText(`${meta.title || "shot-report"}.csv`, `\ufeff${csv}`, "text/csv");
+  }
+
+  return (
+    <div className="shell">
+      <div className="app">
+        <Sidebar tab={tab} setTab={setTab} status={status} health={health} />
+        <Spine form={form} status={status} health={health} report={report} />
+        <main className="main">
+          {tab === "analysis" && (
+            <AnalysisPage
+              drawer={drawer}
+              setDrawer={setDrawer}
+              form={form}
+              updateForm={updateForm}
+              file={file}
+              setFile={setFile}
+              report={report}
+              meta={meta}
+              shots={shownShots}
+              totalShots={shots.length}
+              busy={busy}
+              filter={filter}
+              setFilter={setFilter}
+              onAnalyze={runAnalyze}
+              onUploadGithub={uploadGithub}
+              onExportMarkdown={exportMarkdown}
+              onExportCsv={exportCsv}
+            />
+          )}
+          {tab === "library" && <LibraryPage setTab={setTab} report={report} onExportMarkdown={exportMarkdown} onExportCsv={exportCsv} />}
+          {tab === "prompts" && <PromptsPage />}
+          {tab === "settings" && <SettingsPage settings={settings} setSettings={setSettings} onSave={saveSettings} onRefresh={loadSettings} />}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function Sidebar({ tab, setTab, status, health }) {
+  return (
+    <aside className="rail">
+      <div className="rail-wm">
+        逐镜<br />拉片<span className="en">SHOT READER</span>
+      </div>
+      <nav className="rail-nav">
+        <button className={tab === "analysis" ? "on" : ""} onClick={() => setTab("analysis")}>分析任务</button>
+        <button className={tab === "library" ? "on" : ""} onClick={() => setTab("library")}>报告库</button>
+        <button className={tab === "prompts" ? "on" : ""} onClick={() => setTab("prompts")}>提示词</button>
+        <button className={tab === "settings" ? "on" : ""} onClick={() => setTab("settings")}>设置与密钥</button>
+      </nav>
+      <div className="rail-stat">
+        <div className="v"><i />{status}</div>
+        <p>{health?.visionModel || "QWEN3.7-PLUS"}<br />本地后端<br />127.0.0.1:8765</p>
+      </div>
+    </aside>
+  );
+}
+
+function Spine({ form, status, health, report }) {
+  const shotCount = String(report?.shots?.length || 0).padStart(2, "0");
+  const sceneCount = String(report?.meta?.sceneCount || 0).padStart(2, "0");
+  const items = [
+    `● ${status}`,
+    `MODEL ${(form.analysisMode === "omni" ? health?.omniModel : health?.visionModel) || "QWEN3.7-PLUS"}`,
+    `FPS ${Number(form.fps || 1).toFixed(1)}`,
+    `模式 ${form.analysisMode === "omni" ? "声音/对白专精" : "全模态 · 视频+声音"}`,
+    `上传 ${uploadLabel(form.uploadMode)}`,
+    `就绪 ${sceneCount} / ${shotCount}`,
+  ];
+  return (
+    <div className="spine">
+      <div className="trk">
+        {[...items, ...items].map((item, index) => (
+          <span key={`${item}-${index}`}>{item}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AnalysisPage(props) {
+  const {
+    drawer,
+    setDrawer,
+    form,
+    updateForm,
+    file,
+    setFile,
+    meta,
+    shots,
+    totalShots,
+    busy,
+    filter,
+    setFilter,
+    onAnalyze,
+    onUploadGithub,
+    onExportMarkdown,
+    onExportCsv,
+  } = props;
+  const sceneCount = meta.sceneCount || 0;
+  return (
+    <>
+      <Header
+        eyebrow="No.06 / SHOT-BY-SHOT DOSSIER"
+        title="视频识别 Agent · 逐镜拉片"
+        actions={
+          <>
+            <button className="obtn" onClick={onExportMarkdown}>导出 MD</button>
+            <button className="obtn" onClick={onExportCsv}>导出 CSV</button>
+            <button className="obtn run" disabled={busy} onClick={onAnalyze}>{busy ? "分析中..." : "开始分析 →"}</button>
+          </>
+        }
+      />
+      <div className="stage">
+        <section className={`drawer dw-setup ${drawer === "setup" ? "active" : ""}`}>
+          <button className="dwh" onClick={() => setDrawer("setup")}>
+            <span className="no">1</span>输入设置 · SETUP<span className="gap" /><span className="hint">配置视频与分析参数</span>
+          </button>
+          <div className="dwbody">
+            <div className="cover">
+              <div className="cv-l">
+                <p className="ek">ANALYSIS BRIEF</p>
+                <h3>{meta.title || form.title}</h3>
+                <p>{meta.basis || "基于逐秒截帧的视听语言分析。景别、镜头运动、声音与剪辑注释逐镜成表，可导出 Markdown 与 CSV。"}</p>
+                <div className="cv-mtr">
+                  <div><b>{String(sceneCount).padStart(2, "0")}</b><span>场景</span></div>
+                  <div><b className="ac">{String(totalShots).padStart(2, "0")}</b><span>镜头</span></div>
+                  <div><b>{busy ? "LIVE" : "READY"}</b><span>分析依据</span></div>
+                </div>
+              </div>
+              <div className="frame">
+                <span className="brk tl" /><span className="brk tr" /><span className="brk bl" /><span className="brk br" />
+                <span className="l">{file?.name || form.videoUrl || "▶ 等待视频 URL"}</span>
+              </div>
+            </div>
+            <div className="form">
+              <Field span="s3" label="视频公网 URL"><input className="inp" value={form.videoUrl} onChange={(e) => updateForm("videoUrl", e.target.value)} placeholder="https://example.com/clip.mp4" /></Field>
+              <Field span="s2" label="报告标题"><input className="inp" value={form.title} onChange={(e) => updateForm("title", e.target.value)} /></Field>
+              <Field label="抽帧 FPS"><select className="sel" value={form.fps} onChange={(e) => updateForm("fps", e.target.value)}><option>0.2</option><option>0.5</option><option>1</option><option>2</option></select></Field>
+              <Field span="s2" label="分析模型"><select className="sel" value={form.analysisMode} onChange={(e) => updateForm("analysisMode", e.target.value)}><option value="vision">视频理解主力（qwen3.7-plus）</option><option value="omni">声音/对白专精（qwen3.5-omni-plus）</option></select></Field>
+              <Field span="s2" label="上传方式"><select className="sel" value={form.uploadMode} onChange={(e) => updateForm("uploadMode", e.target.value)}><option value="local">本地路径 · 100MB</option><option value="github">GitHub Releases</option><option value="url">公网 URL</option></select></Field>
+              <Field span="s2" label="本地文件">
+                <div className="file-row">
+                  <input className="inp file" type="file" accept="video/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+                  <button className="mini" type="button" onClick={onUploadGithub}>上传 GitHub</button>
+                </div>
+              </Field>
+              <Field span="s3" label="字幕 / 音轨转写"><textarea className="txa" value={form.subtitleText} onChange={(e) => updateForm("subtitleText", e.target.value)} placeholder="粘贴字幕或转写" /></Field>
+              <Field span="s3" label="补充分析要求"><textarea className="txa" value={form.customPrompt} onChange={(e) => updateForm("customPrompt", e.target.value)} placeholder="例如：重点分析镜头运动与叙事转折" /></Field>
+            </div>
+          </div>
+        </section>
+        <section className={`drawer dw-result ${drawer === "result" ? "active open" : ""}`}>
+          <button className="dwh" onClick={() => setDrawer("result")}>
+            <span className="no">2</span>逐镜结果 · RESULT<span className="gap" /><span className="hint">{totalShots} 镜头 / {sceneCount} 场景 · 点击展开</span><span className="ar">▲</span>
+          </button>
+          <div className="dwbody">
+            <div className="ttools">
+              <div className="l"><span className="otag acid">逐镜表格</span><span className="otag">{totalShots} 镜头</span><span className="otag">{sceneCount} 场景</span></div>
+              <input className="filter" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="筛选镜头、画面、注释" />
+            </div>
+            <ShotTable shots={shots} />
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+
+function ShotTable({ shots }) {
+  return (
+    <div className="tabscroll">
+      <table className="rtab">
+        <thead>
+          <tr>
+            <th>截图</th><th>镜号</th><th>时间码</th><th>景别</th><th>镜头运动</th><th>画面内容 / 人物动作</th><th>分析注释</th><th>声音 / 音乐</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shots.map((shot, index) => (
+            <tr key={`${shot.shot || index}-${shot.timecode || index}`}>
+              <td>{shot.thumbnailUrl ? <img className="thumb-img" src={`${API_BASE}${shot.thumbnailUrl}`} alt={shot.shot || "shot"} /> : <div className="thumb">▶ FRAME</div>}</td>
+              <td className="shotno">{shot.shot || `镜 ${index + 1}`}</td>
+              <td className="nw">{shot.timecode}</td>
+              <td className="nw">{shot.shotSize}</td>
+              <td className="nw">{shot.camera}</td>
+              <td>{shot.visual}</td>
+              <td>{shot.analysis}</td>
+              <td>{shot.audio}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Header({ eyebrow, title, actions }) {
+  return (
+    <div className="dh">
+      <div><p className="idx">{eyebrow}</p><h2>{title}</h2></div>
+      <div className="tools">{actions}</div>
+    </div>
+  );
+}
+
+function Field({ label, span = "", children }) {
+  return <div className={`cell ${span}`}><label className="fld-l">{label}</label>{children}</div>;
+}
+
+function LibraryPage({ setTab, report, onExportMarkdown, onExportCsv }) {
+  const hasReport = Boolean(report?.shots?.length);
+  return (
+    <>
+      <Header eyebrow="No.07 / SAVED REPORTS" title="报告库" actions={<><button className="obtn" onClick={onExportMarkdown}>导出 MD</button><button className="obtn" onClick={onExportCsv}>导出 CSV</button></>} />
+      <div className="body560">
+        <div className="empty">
+          <p className="ek">{hasReport ? "CURRENT · 01 ITEM" : "EMPTY · 00 ITEMS"}</p>
+          <h3>{hasReport ? report.meta?.title || "当前报告" : "还没有已保存的报告"}</h3>
+          <p>{hasReport ? `${report.meta?.sceneCount || 0} 场景 · ${report.shots.length} 镜 · ${report.meta?.basis || "视觉理解分析"}` : "每次分析完成后会归档到这里，可按标题、模型、日期检索，并重新导出 Markdown / CSV。"}</p>
+          <button className="obtn run" onClick={() => setTab("analysis")}>回到分析任务 →</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function PromptsPage() {
+  return (
+    <>
+      <Header eyebrow="No.08 / PROMPT PRESETS" title="提示词" actions={<button className="obtn run">新建预设 →</button>} />
+      <div className="body560">
+        <div className="panel">
+          <div className="pp2">
+            <div className="fld"><label className="fld-l">预设名称</label><input className="inp" defaultValue="电影学院 · 视听语言拉片" /></div>
+            <div className="fld"><label className="fld-l">适用模型</label><select className="sel"><option>全模态</option><option>视觉</option></select></div>
+          </div>
+          <div className="fld prompt-box"><label className="fld-l">系统提示词</label><textarea className="txa tall" defaultValue="你是资深拉片分析师。请按逐镜结构输出：镜号、时间码、景别、镜头运动、画面内容与人物动作、声音/音乐、剪辑与叙事注释。语言精炼，术语准确。" /></div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function SettingsPage({ settings, setSettings, onSave, onRefresh }) {
+  function set(key, value) {
+    setSettings((prev) => ({ ...prev, [key]: value }));
+  }
+  return (
+    <>
+      <Header eyebrow="No.09 / ALIYUN MODEL STUDIO" title="设置与密钥" actions={<><button className="obtn" onClick={onRefresh}>刷新</button><button className="obtn run" onClick={onSave}>保存配置</button></>} />
+      <div className="body560">
+        <div className="panel cfg">
+          <div className="fld"><label className="fld-l">DASHSCOPE_API_KEY</label><input className="inp" type="password" value={settings.dashscope_api_key || ""} onChange={(e) => set("dashscope_api_key", e.target.value)} placeholder={settings.dashscope_api_key_masked || "未保存"} /><span className="fnote">留空保存时会保留原值</span></div>
+          <div className="cfg-g3">
+            <ConfigInput label="Workspace ID" value={settings.workspace_id} onChange={(v) => set("workspace_id", v)} />
+            <ConfigInput label="Region" value={settings.region} onChange={(v) => set("region", v)} />
+            <ConfigInput label="兼容模式 Base URL" value={settings.dashscope_base_url} onChange={(v) => set("dashscope_base_url", v)} />
+          </div>
+          <div className="cfg-g2">
+            <ConfigInput label="视觉模型" value={settings.vision_model} onChange={(v) => set("vision_model", v)} />
+            <ConfigInput label="全模态模型" value={settings.omni_model} onChange={(v) => set("omni_model", v)} />
+          </div>
+          <div className="cfg-div"><h4>GitHub Releases 临时 URL</h4><p>上传为 Release asset，用 browser_download_url 作为视频公网地址。仓库建议 public。</p></div>
+          <div className="cfg-g2">
+            <div className="fld"><label className="fld-l">GitHub Token</label><input className="inp" type="password" value={settings.github_token || ""} onChange={(e) => set("github_token", e.target.value)} placeholder={settings.github_token_masked || "未保存"} /></div>
+            <ConfigInput label="Owner" value={settings.github_owner} onChange={(v) => set("github_owner", v)} />
+          </div>
+          <div className="cfg-g3">
+            <ConfigInput label="Repo" value={settings.github_repo} onChange={(v) => set("github_repo", v)} />
+            <ConfigInput label="Release Tag" value={settings.github_release_tag} onChange={(v) => set("github_release_tag", v)} />
+            <ConfigInput label="Asset Prefix" value={settings.github_asset_prefix} onChange={(v) => set("github_asset_prefix", v)} />
+          </div>
+          <div className="cfg-act"><button className="obtn run" onClick={onSave}>保存配置</button><button className="obtn" onClick={onRefresh}>刷新</button></div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ConfigInput({ label, value = "", onChange }) {
+  return <div className="fld"><label className="fld-l">{label}</label><input className="inp" value={value || ""} onChange={(e) => onChange(e.target.value)} /></div>;
+}
+
+async function request(path, options = {}) {
+  const response = await fetch(`${API_BASE}${path}`, options);
+  const text = await response.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { detail: text };
+  }
+  if (!response.ok) throw new Error(data.detail || data.message || response.statusText);
+  return data;
+}
+
+function downloadText(name, content, type) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name.replace(/[\\/:*?"<>|]/g, "_");
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function uploadLabel(mode) {
+  if (mode === "github") return "GitHub Releases";
+  if (mode === "url") return "公网 URL";
+  return "本地路径 · 100MB";
+}
+
+createRoot(document.getElementById("root")).render(<App />);
