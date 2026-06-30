@@ -1,4 +1,7 @@
 import ctypes
+import shutil
+import subprocess
+import tempfile
 import threading
 import time
 import tkinter as tk
@@ -70,6 +73,7 @@ class VideoAgentApp(tk.Tk):
 
         self.report = None
         self.tree_item_map = {}
+        self.thumbnail_images = {}
         self.fields = {}
         self.page_buttons = {}
         self.pages = {}
@@ -178,7 +182,7 @@ class VideoAgentApp(tk.Tk):
             fieldbackground=COLORS["paper_2"],
             foreground=COLORS["ink"],
             bordercolor=COLORS["line"],
-            rowheight=34,
+            rowheight=64,
             font=(FONT_UI, 10),
         )
         self.style.configure(
@@ -633,13 +637,14 @@ class VideoAgentApp(tk.Tk):
         self.tree = ttk.Treeview(
             table_wrap,
             style="Overprint.Treeview",
-            columns=("thumb", "shot", "timecode", "size", "camera", "visual", "audio", "analysis"),
-            show="headings",
+            columns=("shot", "timecode", "size", "camera", "visual", "audio", "analysis"),
+            show="tree headings",
             selectmode="browse",
             height=12,
         )
+        self.tree.heading("#0", text="截图")
+        self.tree.column("#0", width=96, minwidth=96, stretch=False, anchor="center")
         columns = {
-            "thumb": ("截图", 74),
             "shot": ("镜号", 78),
             "timecode": ("时间码", 112),
             "size": ("景别", 80),
@@ -650,7 +655,7 @@ class VideoAgentApp(tk.Tk):
         }
         for key, (label, width) in columns.items():
             self.tree.heading(key, text=label)
-            anchor = "center" if key in {"thumb", "shot"} else "w"
+            anchor = "center" if key == "shot" else "w"
             self.tree.column(key, width=width, minwidth=width, anchor=anchor, stretch=key in {"visual", "analysis"})
         y_scroll = ttk.Scrollbar(table_wrap, orient="vertical", command=self.tree.yview)
         x_scroll = ttk.Scrollbar(table_wrap, orient="horizontal", command=self.tree.xview)
@@ -1069,6 +1074,7 @@ class VideoAgentApp(tk.Tk):
         mode = inputs["mode"]
         video_url = inputs["video_url"]
         local_path = inputs["local_path"] if mode == "local" else ""
+        thumbnail_source = inputs["local_path"] if inputs.get("local_path") else ""
         if mode in ("local", "github") and not inputs["local_path"]:
             raise RuntimeError("请先选择本地视频文件。")
         if mode == "url" and not video_url:
@@ -1089,9 +1095,84 @@ class VideoAgentApp(tk.Tk):
             subtitle_text=inputs["subtitle_text"],
             custom_prompt=inputs["custom_prompt"],
         )
+        if thumbnail_source:
+            self.set_status("正在生成镜头截图")
+            self.attach_shot_thumbnails(result["report"], thumbnail_source)
         self.after(0, lambda: self.apply_report(result["report"]))
         shot_count = len(result["report"].get("shots", []))
         self.set_status(f"分析完成：{shot_count} 镜")
+
+    def attach_shot_thumbnails(self, report, video_path):
+        ffmpeg = shutil.which("ffmpeg")
+        path = Path(video_path)
+        if not ffmpeg or not path.exists():
+            return
+        shots = report.get("shots", [])
+        if not shots:
+            return
+        thumb_dir = Path(tempfile.mkdtemp(prefix="shot-reader-thumbs-"))
+        report["_thumbnail_dir"] = str(thumb_dir)
+        for index, shot in enumerate(shots):
+            start = self.shot_start_seconds(shot, index)
+            output = thumb_dir / f"shot-{index + 1:03d}.png"
+            args = [
+                ffmpeg,
+                "-y",
+                "-ss",
+                f"{max(start, 0):.3f}",
+                "-i",
+                str(path),
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=96:54:force_original_aspect_ratio=decrease,pad=96:54:(ow-iw)/2:(oh-ih)/2:color=0x151b20",
+                "-f",
+                "image2",
+                str(output),
+            ]
+            try:
+                subprocess.run(
+                    args,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=20,
+                    check=True,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except (subprocess.SubprocessError, OSError):
+                continue
+            if output.exists():
+                shot["_thumbnail_file"] = str(output)
+
+    def shot_start_seconds(self, shot, index):
+        start = shot.get("start")
+        try:
+            return float(start)
+        except (TypeError, ValueError):
+            pass
+        timecode = str(shot.get("timecode") or "")
+        for separator in ("-", "–", "—", "~", "至"):
+            if separator in timecode:
+                timecode = timecode.split(separator, 1)[0]
+                break
+        return self.time_string_to_seconds(timecode.strip(), index * 10)
+
+    def time_string_to_seconds(self, value, fallback=0):
+        if not value:
+            return fallback
+        cleaned = value.replace("：", ":")
+        parts = [part.strip() for part in cleaned.split(":") if part.strip()]
+        try:
+            numbers = [float(part) for part in parts]
+        except ValueError:
+            return fallback
+        if len(numbers) == 3:
+            return numbers[0] * 3600 + numbers[1] * 60 + numbers[2]
+        if len(numbers) == 2:
+            return numbers[0] * 60 + numbers[1]
+        if len(numbers) == 1:
+            return numbers[0]
+        return fallback
 
     def set_public_url(self, url):
         def apply():
@@ -1139,6 +1220,7 @@ class VideoAgentApp(tk.Tk):
         for item in self.tree.get_children():
             self.tree.delete(item)
         self.tree_item_map = {}
+        self.thumbnail_images = {}
         self.hover_item = None
         shots = self.report.get("shots", []) if self.report else []
         query = self.result_filter.get().strip().lower() if hasattr(self, "result_filter") else ""
@@ -1152,11 +1234,13 @@ class VideoAgentApp(tk.Tk):
         if hasattr(self, "result_count_var"):
             self.result_count_var.set(f"{len(shots):02d} 镜")
         for index, shot in enumerate(shots):
+            image = self.load_shot_thumbnail(shot)
             item = self.tree.insert(
                 "",
                 "end",
+                text="" if image else "▧",
+                image=image or "",
                 values=(
-                    shot.get("screenshot") or shot.get("thumbnail") or "▧",
                     shot.get("shot", ""),
                     shot.get("timecode", ""),
                     shot.get("shotSize", ""),
@@ -1167,6 +1251,8 @@ class VideoAgentApp(tk.Tk):
                 ),
                 tags=("odd" if index % 2 else "even",),
             )
+            if image:
+                self.thumbnail_images[item] = image
             self.tree_item_map[item] = shot
         children = self.tree.get_children()
         if children:
@@ -1175,6 +1261,18 @@ class VideoAgentApp(tk.Tk):
             self.update_detail(self.tree_item_map[children[0]])
         else:
             self._set_text(self.detail_text, "没有可展示的镜头。")
+
+    def load_shot_thumbnail(self, shot):
+        path = shot.get("_thumbnail_file") or shot.get("thumbnailFile") or shot.get("thumbnail")
+        if not path:
+            return None
+        thumb_path = Path(str(path))
+        if not thumb_path.exists():
+            return None
+        try:
+            return tk.PhotoImage(file=str(thumb_path))
+        except tk.TclError:
+            return None
 
     def on_tree_select(self, _event):
         selection = self.tree.selection()
