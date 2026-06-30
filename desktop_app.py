@@ -252,12 +252,123 @@ class VideoAgentApp(tk.Tk):
         )
 
     def _build_rail(self):
-        self.rail.rowconfigure(4, weight=1)
-        tk.Label(self.rail, text="●", bg=COLORS["paper_2"], fg="#394047", font=(FONT_MONO, 12, "bold")).grid(row=0, column=0, pady=(14, 8))
-        tk.Label(self.rail, text=self.vertical_text("DASHSCOPE 已连接"), bg=COLORS["paper_2"], fg=COLORS["muted"], font=(FONT_MONO, 8, "bold"), justify="center").grid(row=1, column=0, pady=(0, 18))
-        tk.Label(self.rail, text=self.vertical_text("MODEL QWEN3.7 PLUS"), bg=COLORS["paper_2"], fg=COLORS["acid_dim"], font=(FONT_MONO, 8, "bold"), justify="center").grid(row=2, column=0, pady=(0, 18))
-        tk.Label(self.rail, text=self.vertical_text("FPS 1.0"), bg=COLORS["paper_2"], fg=COLORS["acid_dim"], font=(FONT_MONO, 8, "bold"), justify="center").grid(row=3, column=0, pady=(0, 18))
-        tk.Label(self.rail, text=self.vertical_text("上传 本地路径"), bg=COLORS["paper_2"], fg=COLORS["muted"], font=(FONT_MONO, 8, "bold"), justify="center").grid(row=5, column=0, pady=(18, 14))
+        self.rail_canvas = tk.Canvas(
+            self.rail,
+            width=44,
+            bg=COLORS["paper_2"],
+            highlightthickness=0,
+            bd=0,
+        )
+        self.rail_canvas.pack(fill="both", expand=True)
+        self.rail_y = 18
+        self.rail_text_cache = ""
+        self.rail_text_item = self.rail_canvas.create_text(
+            22,
+            self.rail_y,
+            text="",
+            anchor="n",
+            fill=COLORS["ink"],
+            font=(FONT_MONO, 8, "bold"),
+            justify="center",
+        )
+        self._refresh_rail_marquee(reset=True)
+        self.after(90, self._tick_rail_marquee)
+
+    def _bind_rail_sources(self):
+        if getattr(self, "_rail_sources_bound", False):
+            return
+        self._rail_sources_bound = True
+        for var in (
+            self.status,
+            self.scene_count_var,
+            self.shot_count_var,
+            self.task_mode_var,
+            self.analysis_mode,
+            self.upload_mode,
+            self.fps,
+            self.local_file,
+            self.video_url,
+        ):
+            var.trace_add("write", lambda *_: self._refresh_rail_marquee())
+        self._refresh_rail_marquee(reset=True)
+
+    def _rail_analysis_mode_value(self):
+        if not hasattr(self, "analysis_mode"):
+            return "vision"
+        return ANALYSIS_MODE_OPTIONS.get(self.analysis_mode.get(), "vision")
+
+    def _rail_model_name(self):
+        config = get_config()
+        mode = self._rail_analysis_mode_value()
+        if mode == "omni":
+            return str(config.get("omni_model") or "qwen3.5-omni-plus")
+        return str(config.get("vision_model") or "qwen3.7-plus")
+
+    def _rail_mode_label(self):
+        mode = self._rail_analysis_mode_value()
+        if mode == "omni":
+            return "声音/对白专精"
+        return "全模态 · 视频+声音"
+
+    def _rail_upload_label(self):
+        if hasattr(self, "upload_mode"):
+            return self.upload_mode.get()
+        return "本地路径 · 100MB"
+
+    def _format_fps(self):
+        value = self.fps.get() if hasattr(self, "fps") else "1"
+        try:
+            return f"{float(value):.1f}"
+        except ValueError:
+            return value
+
+    def _format_ready_count(self):
+        scene_count = self.scene_count_var.get().strip() or "00"
+        shot_count = self.shot_count_var.get().strip() or "00"
+        return f"{scene_count.zfill(2)} / {shot_count.zfill(2)}"
+
+    def _rail_marquee_text(self):
+        model = self._rail_model_name().upper().replace("-", " ")
+        status = self.status.get().strip() or "DASHSCOPE 已连接"
+        chunks = [
+            f"MOD {model}",
+            f"FPS {self._format_fps()}",
+            f"模式 {self._rail_mode_label()}",
+            f"上传 {self._rail_upload_label()}",
+            f"就绪 {self._format_ready_count()}",
+            f"● {status}",
+        ]
+        return "\n\n".join(self.vertical_text(chunk) for chunk in chunks)
+
+    def _refresh_rail_marquee(self, reset=False):
+        if not hasattr(self, "rail_canvas"):
+            return
+        text = self._rail_marquee_text()
+        if text != self.rail_text_cache:
+            self.rail_text_cache = text
+            self.rail_canvas.itemconfigure(self.rail_text_item, text=text)
+        if reset:
+            self.rail_y = 18
+            self.rail_canvas.coords(self.rail_text_item, 22, self.rail_y)
+
+    def _tick_rail_marquee(self):
+        if not hasattr(self, "rail_canvas"):
+            return
+        try:
+            if not self.rail_canvas.winfo_exists():
+                return
+            self._refresh_rail_marquee()
+            height = self.rail_canvas.winfo_height()
+            bbox = self.rail_canvas.bbox(self.rail_text_item)
+            if height > 1 and bbox:
+                if bbox[3] < -12:
+                    self.rail_y = height + 12
+                else:
+                    self.rail_y -= 1
+                self.rail_canvas.coords(self.rail_text_item, 22, self.rail_y)
+        except tk.TclError:
+            return
+        self.after(90, self._tick_rail_marquee)
 
     def _build_header(self):
         header = tk.Frame(self.main, bg=COLORS["paper"])
@@ -368,6 +479,7 @@ class VideoAgentApp(tk.Tk):
         result.body.columnconfigure(0, weight=1)
         result.body.rowconfigure(0, weight=1)
         self._build_result_area(result.body)
+        self._bind_rail_sources()
 
     def _build_result_area(self, parent):
         table_wrap = tk.Frame(parent, bg=COLORS["ink"], padx=2, pady=2)
