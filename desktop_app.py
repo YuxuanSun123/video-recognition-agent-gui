@@ -491,9 +491,10 @@ class VideoAgentApp(tk.Tk):
 
     def show_page(self, page):
         for page_frame in self.pages.values():
-            page_frame.grid_remove()
+            if not page_frame.winfo_manager():
+                page_frame.grid(row=0, column=0, sticky="nsew")
         target = self.pages.get(page, self.workbench)
-        target.grid(row=0, column=0, sticky="nsew")
+        target.tkraise()
         for key, button in self.page_buttons.items():
             active = key == page
             button._active = active
@@ -501,6 +502,19 @@ class VideoAgentApp(tk.Tk):
                 fg=COLORS["acid"] if active else "#c8ccd0",
                 highlightbackground=COLORS["acid"] if active else COLORS["ink"],
                 font=(FONT_UI, 10, "bold" if active else "normal"),
+            )
+        if page == "workbench":
+            self.after_idle(self.restore_workbench_layout)
+
+    def restore_workbench_layout(self):
+        if not hasattr(self, "analysis_stage"):
+            return
+        self.workbench.update_idletasks()
+        self.input_panel.place_configure(x=0, y=0, relwidth=1, relheight=1)
+        self._layout_drawers()
+        if hasattr(self, "input_scroll_shell"):
+            self.input_scroll_shell.canvas.configure(
+                scrollregion=self.input_scroll_shell.canvas.bbox("all")
             )
 
     def _build_workbench(self):
