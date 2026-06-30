@@ -157,8 +157,8 @@ function getRuntimeConfig() {
     baseURLRaw: value("DASHSCOPE_BASE_URL"),
     workspaceId: value("DASHSCOPE_WORKSPACE_ID"),
     region: value("DASHSCOPE_REGION", "cn-beijing"),
-    visionModel: value("ALIYUN_VISION_MODEL", "qwen3.6-plus"),
-    omniModel: value("ALIYUN_OMNI_MODEL", "qwen3.6-plus"),
+    visionModel: value("ALIYUN_VISION_MODEL", "qwen3.7-plus"),
+    omniModel: value("ALIYUN_OMNI_MODEL", "qwen3.5-omni-plus"),
     ossAccessKeyId: value("OSS_ACCESS_KEY_ID"),
     ossAccessKeySecret: value("OSS_ACCESS_KEY_SECRET"),
     ossRegion: value("OSS_REGION", "oss-cn-beijing"),
@@ -222,8 +222,8 @@ async function saveConfig(input) {
     DASHSCOPE_BASE_URL: cleanConfigValue(input.baseURL),
     DASHSCOPE_WORKSPACE_ID: cleanConfigValue(input.workspaceId),
     DASHSCOPE_REGION: cleanConfigValue(input.region) || "cn-beijing",
-    ALIYUN_VISION_MODEL: cleanConfigValue(input.visionModel) || "qwen3.6-plus",
-    ALIYUN_OMNI_MODEL: cleanConfigValue(input.omniModel) || "qwen3.6-plus",
+    ALIYUN_VISION_MODEL: cleanConfigValue(input.visionModel) || "qwen3.7-plus",
+    ALIYUN_OMNI_MODEL: cleanConfigValue(input.omniModel) || "qwen3.5-omni-plus",
     OSS_REGION: cleanConfigValue(input.ossRegion) || "oss-cn-beijing",
     OSS_BUCKET: cleanConfigValue(input.ossBucket),
     OSS_ENDPOINT: cleanConfigValue(input.ossEndpoint),
@@ -622,7 +622,7 @@ async function analyzeVideo(input) {
 
   if (uploadId) {
     if (analysisMode === "omni") {
-      throw new Error("100MB 本地路径模式当前走 DashScope 视觉 SDK。请切换到“视觉：大文件拉片”；如需声音理解，请使用 OSS/公网 URL + 全模态模式。");
+      throw new Error("100MB 本地路径模式当前走 DashScope 视觉 SDK。请切换到“视频理解主力”；如需声音理解，请使用 OSS/公网 URL + 声音/对白专精模式。");
     }
 
     const { localPath } = resolveUpload(uploadId);

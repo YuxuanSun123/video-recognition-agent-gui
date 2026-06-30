@@ -66,8 +66,8 @@
           <div class="field">
             <label for="analysisMode">分析模型</label>
             <select id="analysisMode">
-              <option value="omni" selected>全模态：视频 + 声音</option>
-              <option value="vision">视觉：大文件拉片</option>
+              <option value="vision" selected>视频理解主力：qwen3.7-plus</option>
+              <option value="omni">声音/对白专精：qwen3.5-omni-plus</option>
             </select>
           </div>
           <div class="field">
@@ -88,7 +88,7 @@
         <section class="prompt-band" aria-label="补充信息">
           <div class="field">
             <label for="subtitleText">字幕 / 音轨转写</label>
-            <textarea id="subtitleText" rows="3" placeholder="视觉模式可粘贴字幕或转写；全模态模式可作为校对材料"></textarea>
+            <textarea id="subtitleText" rows="3" placeholder="视频理解模式可粘贴字幕或转写；声音专精模式可作为校对材料"></textarea>
           </div>
           <div class="field">
             <label for="prompt">补充分析要求</label>
@@ -175,12 +175,12 @@
               </div>
               <div class="settings-grid">
                 <div class="field">
-                  <label for="configVisionModel">视觉模型</label>
-                  <input id="configVisionModel" type="text" value="qwen3.6-plus">
+                  <label for="configVisionModel">视频理解模型</label>
+                  <input id="configVisionModel" type="text" value="qwen3.7-plus">
                 </div>
                 <div class="field">
-                  <label for="configOmniModel">全模态模型</label>
-                  <input id="configOmniModel" type="text" value="qwen3.6-plus">
+                  <label for="configOmniModel">声音专精模型</label>
+                  <input id="configOmniModel" type="text" value="qwen3.5-omni-plus">
                 </div>
               </div>
               <div class="settings-divider">

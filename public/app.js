@@ -151,7 +151,7 @@ async function loadHealth() {
     els.apiStatus.style.color = health.configured ? "var(--green)" : "var(--gold)";
     const sdkStatus = health.python?.ok ? "SDK 已就绪" : "本地 SDK 未安装";
     els.apiHint.textContent = health.configured
-      ? `视觉 ${health.visionModel} / 全模态 ${health.omniModel} / ${sdkStatus}`
+      ? `视频 ${health.visionModel} / 声音 ${health.omniModel} / ${sdkStatus}`
       : "未检测到 DASHSCOPE_API_KEY，可先用演示数据查看平台。";
   } catch (error) {
     els.apiStatus.textContent = "后端异常";
@@ -168,8 +168,8 @@ async function loadConfig() {
     els.configWorkspace.value = config.workspaceId || "";
     els.configRegion.value = config.region || "cn-beijing";
     els.configBaseUrl.value = config.baseURLRaw || "";
-    els.configVisionModel.value = config.visionModel || "qwen3.6-plus";
-    els.configOmniModel.value = config.omniModel || "qwen3.6-plus";
+    els.configVisionModel.value = config.visionModel || "qwen3.7-plus";
+    els.configOmniModel.value = config.omniModel || "qwen3.5-omni-plus";
     els.configOssAccessKeyId.value = "";
     els.configOssAccessKeySecret.value = "";
     els.configOssRegion.value = config.ossRegion || "oss-cn-beijing";
@@ -395,7 +395,7 @@ async function runAnalysis() {
   }
 
   els.runAnalysis.disabled = true;
-  const modeLabel = state.uploadId ? "DashScope 本地路径视觉模型" : (payload.analysisMode === "omni" ? "全模态音视频模型" : "视觉理解模型");
+  const modeLabel = state.uploadId ? "DashScope 本地路径视频理解模型" : (payload.analysisMode === "omni" ? "声音/对白专精模型" : "视频理解主力模型");
   setProgress(state.health?.configured ? `正在提交给阿里云${modeLabel}...` : "正在生成演示报告...");
 
   try {
@@ -524,7 +524,7 @@ async function handleVideoFile() {
     const uploaded = await uploadLocalVideo(file);
     state.uploadId = uploaded.uploadId;
     els.analysisMode.value = "vision";
-    setProgress(`已保存本地路径：${file.name}。将使用视觉模型分析；如需声音理解，请改用 OSS/公网 URL + 全模态模式。`);
+    setProgress(`已保存本地路径：${file.name}。将使用视频理解模型分析；如需声音理解，请改用 OSS/公网 URL + 声音/对白专精模式。`);
   } catch (error) {
     state.uploadId = "";
     setProgress(error.message, "error");

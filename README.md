@@ -1,6 +1,6 @@
 # 视频识别 Agent GUI
 
-一个面向影视拉片、视频审阅和多模态分析的原生桌面工具。它可以调用阿里云百炼 / DashScope 的 Qwen 视觉与全模态模型，把视频分析成逐镜报告，并导出 Markdown 或 CSV。
+一个面向影视拉片、视频审阅和多模态分析的原生桌面工具。它可以调用阿里云百炼 / DashScope 的 Qwen 视频理解和音频专精模型，把视频分析成逐镜报告，并导出 Markdown 或 CSV。
 
 当前主入口是原生 Windows GUI，不是浏览器页面或 HTML 外壳。
 
@@ -12,8 +12,8 @@
 - 支持公网 URL 分析：走 OpenAI 兼容接口的 `video_url`。
 - 支持 GitHub Releases 上传：把本地视频上传为 Release asset，并用 `browser_download_url` 作为临时公网 URL。
 - 支持两种分析模式：
-  - 全模态（画面 + 声音）：默认使用 `qwen3.6-plus`，适合对白、音乐、环境声也要进入分析的场景。
-  - 视觉（仅画面）：适合只做构图、景别、镜头运动、人物动作等画面拉片。
+  - 视频理解主力：默认使用 `qwen3.7-plus`，适合逐镜拉片、长视频理解、结构化报告。
+  - 声音/对白专精：默认使用 `qwen3.5-omni-plus`，适合对白、音乐、环境声更重要的场景。
 - 支持手动选择抽帧 fps：`0.2`、`0.5`、`1`、`2`。
 - 支持粘贴字幕 / ASR 文本和补充分析要求。
 - 支持导出 Markdown 和 CSV。
@@ -64,8 +64,8 @@ DASHSCOPE_API_KEY=sk-your-api-key
 DASHSCOPE_WORKSPACE_ID=你的业务空间ID
 DASHSCOPE_REGION=cn-beijing
 DASHSCOPE_BASE_URL=
-ALIYUN_VISION_MODEL=qwen3.6-plus
-ALIYUN_OMNI_MODEL=qwen3.6-plus
+ALIYUN_VISION_MODEL=qwen3.7-plus
+ALIYUN_OMNI_MODEL=qwen3.5-omni-plus
 GITHUB_TOKEN=
 GITHUB_OWNER=
 GITHUB_REPO=
@@ -111,7 +111,7 @@ DASHSCOPE_BASE_URL=https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible
 - 以公网 URL 传入时，`qwen3.6` 系列、`qwen3.5` 系列、Qwen3-VL 系列等最高可到 2GB，具体以官方文档和模型版本为准。
 - 以 Base64 传入时，编码后的字符串需要小于 10MB。
 - 以本地文件路径传入时，视频本身不超过 100MB，并且主要适用于 DashScope Python / Java SDK。
-- 需要对白、音乐、环境声分析时，优先使用公网 URL + 全模态模式，并以当前模型市场中标注支持音频的视频模型为准。
+- 默认建议用 `qwen3.7-plus` 生成逐镜拉片主报告；对白、音乐、环境声很关键时，切换到 `qwen3.5-omni-plus` 做声音专精分析或交叉校对。
 
 参考：
 

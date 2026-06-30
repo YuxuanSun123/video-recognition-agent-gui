@@ -35,8 +35,8 @@ COLORS = {
 }
 
 ANALYSIS_MODE_OPTIONS = {
-    "全模态（画面 + 声音）": "omni",
-    "视觉（仅画面）": "vision",
+    "视频理解主力（qwen3.7-plus）": "vision",
+    "声音/对白专精（qwen3.5-omni-plus）": "omni",
 }
 
 
@@ -235,7 +235,7 @@ class VideoAgentApp(tk.Tk):
         ttk.Label(control, text="任务输入", style="Title.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 14))
 
         self.title_var = tk.StringVar(value="逐镜拉片报告")
-        self.analysis_mode = tk.StringVar(value="全模态（画面 + 声音）")
+        self.analysis_mode = tk.StringVar(value="视频理解主力（qwen3.7-plus）")
         self.fps = tk.StringVar(value="1")
         self.upload_mode = tk.StringVar(value="local")
 
@@ -357,8 +357,8 @@ class VideoAgentApp(tk.Tk):
             ("workspace_id", "Workspace ID", False),
             ("region", "Region", False),
             ("dashscope_base_url", "Base URL", False),
-            ("vision_model", "视觉模型", False),
-            ("omni_model", "全模态模型", False),
+            ("vision_model", "视频理解模型", False),
+            ("omni_model", "声音专精模型", False),
             ("github_token", "GitHub Token", True),
             ("github_owner", "GitHub Owner", False),
             ("github_repo", "GitHub Repo", False),
