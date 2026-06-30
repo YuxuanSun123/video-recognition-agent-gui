@@ -212,13 +212,13 @@ class VideoAgentApp(tk.Tk):
         self.rail.grid_propagate(False)
         self._build_rail()
 
-        shell = tk.Frame(self, bg=COLORS["ink"], padx=0, pady=0)
+        shell = tk.Frame(self, bg=COLORS["paper"], padx=0, pady=0)
         shell.grid(row=0, column=2, sticky="nsew", padx=0, pady=0)
         shell.columnconfigure(0, weight=1)
         shell.rowconfigure(0, weight=1)
 
-        self.main = tk.Frame(shell, bg=COLORS["paper"], highlightthickness=2, highlightbackground=COLORS["ink"])
-        self.main.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=(0, 8))
+        self.main = tk.Frame(shell, bg=COLORS["paper"], highlightthickness=0)
+        self.main.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
         self.main.columnconfigure(0, weight=1)
         self.main.rowconfigure(2, weight=1)
 
