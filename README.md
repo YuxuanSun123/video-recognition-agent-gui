@@ -173,7 +173,7 @@ Tauri sidecar 会在构建时自动打包为当前平台需要的 `backend-sidec
 
 ### macOS 正式签名 / 公证
 
-如果要消除 macOS 的未签名提示，需要在 GitHub 仓库的 Actions Secrets 中配置 Apple 签名信息：
+当前 Release workflow 默认生成未签名 macOS 测试包。要消除 macOS 的未签名提示，需要 Apple Developer Program，并在独立的签名/公证 workflow 中配置 Apple 签名信息：
 
 ```text
 APPLE_SIGNING_IDENTITY
@@ -193,7 +193,7 @@ APPLE_TEAM_ID
 - `APPLE_PASSWORD`：Apple 账号的 app-specific password。
 - `APPLE_TEAM_ID`：Apple Developer Team ID。
 
-没有这些 secrets 时，工作流仍会构建 macOS 测试包，但 Gatekeeper 会提示未签名/无法验证开发者。
+没有签名/公证流程时，macOS 测试包仍可构建，但 Gatekeeper 会提示未签名/无法验证开发者。
 
 ## 项目结构
 

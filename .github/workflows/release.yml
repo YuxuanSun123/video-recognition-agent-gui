@@ -67,15 +67,9 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS signing / notarization is optional.
-          # Without these secrets, macOS builds are ad-hoc/unsigned test builds
-          # and Gatekeeper will show an unidentified developer warning.
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Unsigned macOS test build. To publish a Gatekeeper-friendly Mac app,
+          # add a separate signed/notarized workflow with Apple Developer secrets.
+          APPLE_SIGNING_IDENTITY: "-"
         with:
           tagName: ${{ env.RELEASE_TAG }}
           releaseName: "Shot Reader ${{ env.RELEASE_TAG }}"
