@@ -2,7 +2,15 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8765";
+const DESKTOP_API_BASE = "http://127.0.0.1:32176";
+const configuredApiBase = import.meta.env.VITE_API_BASE;
+const API_BASE =
+  typeof configuredApiBase === "string"
+    ? configuredApiBase.replace(/\/$/, "")
+    : import.meta.env.DEV
+      ? ""
+      : DESKTOP_API_BASE;
+const API_LABEL = (API_BASE || "Vite proxy /api").replace(/^https?:\/\//, "");
 
 const emptyReport = {
   meta: {
@@ -276,7 +284,7 @@ function Sidebar({ tab, setTab, status, health }) {
       </nav>
       <div className="rail-stat">
         <div className="v"><i />{status}</div>
-        <p>{health?.visionModel || "QWEN3.7-PLUS"}<br />本地后端<br />127.0.0.1:8765</p>
+        <p>{health?.visionModel || "QWEN3.7-PLUS"}<br />本地后端<br />{API_LABEL}</p>
       </div>
     </aside>
   );
@@ -535,7 +543,14 @@ function ConfigInput({ label, value = "", onChange }) {
 }
 
 async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, options);
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, options);
+  } catch (error) {
+    throw new Error(
+      `本地后端未连接：请确认 Shot Reader.exe 与 backend-sidecar.exe 在同一目录，或没有安全软件拦截后端进程。详情：${error.message}`,
+    );
+  }
   const text = await response.text();
   let data = {};
   try {
@@ -543,7 +558,19 @@ async function request(path, options = {}) {
   } catch {
     data = { detail: text };
   }
-  if (!response.ok) throw new Error(data.detail || data.message || response.statusText);
+  if (!response.ok) {
+    const detail = data.detail || data.message || response.statusText;
+    const looksLikeStatic404 =
+      response.status === 404 &&
+      typeof detail === "string" &&
+      /<!doctype html|<html|page not found|404/i.test(detail);
+    if (looksLikeStatic404) {
+      throw new Error(
+        `后端 API 未连接：${API_LABEL} 返回了 404。新电脑上通常是本地后端没有启动，或端口被其他程序占用。请重新下载完整免安装包，确认 backend-sidecar.exe 没被安全软件删除。`,
+      );
+    }
+    throw new Error(detail);
+  }
   return data;
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "shot-reader-tauri",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Desktop shot-by-shot video analysis app powered by DashScope, React, FastAPI, and Tauri.",
   "type": "module",
   "scripts": {

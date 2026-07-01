@@ -38,7 +38,7 @@ fn start_backend_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
         .sidecar("backend-sidecar")?
         .env("SHOT_READER_DATA_DIR", data_dir.as_os_str())
         .env("VIDEO_AGENT_HOST", "127.0.0.1")
-        .env("VIDEO_AGENT_PORT", "8765")
+        .env("VIDEO_AGENT_PORT", "32176")
         .env("VIDEO_AGENT_LOG_LEVEL", "warning");
 
     let (mut rx, child) = sidecar.spawn()?;
