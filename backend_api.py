@@ -1,11 +1,10 @@
 import os
 import shutil
 import subprocess
-import tempfile
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +16,13 @@ from video_agent_core import (
     mask_secret,
     save_config,
     upload_to_github_release,
+)
+from codex_agent_core import (
+    JOBS_DIR,
+    create_codex_job,
+    get_codex_job,
+    get_codex_status,
+    run_codex_job,
 )
 
 
@@ -42,6 +48,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.mount("/media/thumbnails", StaticFiles(directory=str(THUMB_DIR)), name="thumbnails")
+app.mount("/media/jobs", StaticFiles(directory=str(JOBS_DIR)), name="jobs")
 
 
 @app.get("/api/health")
@@ -50,6 +57,7 @@ def health():
     return {
         "ok": True,
         "dashscope": bool(config.get("dashscope_api_key")),
+        "codexAvailable": bool(shutil.which("codex")),
         "visionModel": config.get("vision_model"),
         "omniModel": config.get("omni_model"),
     }
@@ -123,6 +131,61 @@ async def analyze(
     if local_path:
         attach_thumbnails(result["report"], local_path)
     return JSONResponse(result)
+
+
+@app.get("/api/codex/status")
+def codex_status():
+    return get_codex_status()
+
+
+@app.post("/api/codex/analyze")
+async def codex_analyze(
+    background_tasks: BackgroundTasks,
+    mode: str = Form("local"),
+    title: str = Form("逐镜拉片报告"),
+    video_url: str = Form(""),
+    fps: str = Form("1"),
+    subtitle_text: str = Form(""),
+    custom_prompt: str = Form(""),
+    file: UploadFile | None = File(None),
+):
+    status = get_codex_status()
+    if not status.get("ready"):
+        raise HTTPException(status_code=400, detail=status.get("message") or "Codex 不可用。")
+
+    local_path = ""
+    if file and file.filename:
+        local_path = str(await persist_upload(file))
+
+    if mode == "github":
+        if not local_path:
+            raise HTTPException(status_code=400, detail="请先选择本地视频文件。")
+        try:
+            video_url = upload_to_github_release(local_path)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not local_path and not video_url:
+        raise HTTPException(status_code=400, detail="请提供本地视频文件或公网 URL。")
+
+    job = create_codex_job(
+        title=title,
+        video_url=video_url,
+        local_path=local_path,
+        fps=fps,
+        subtitle_text=subtitle_text,
+        custom_prompt=custom_prompt,
+    )
+    background_tasks.add_task(run_codex_job, job["id"])
+    return JSONResponse(job)
+
+
+@app.get("/api/jobs/{job_id}")
+def read_job(job_id: str):
+    try:
+        return get_codex_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="找不到这个分析任务。") from exc
 
 
 async def persist_upload(file: UploadFile) -> Path:

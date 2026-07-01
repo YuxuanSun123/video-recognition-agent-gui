@@ -35,6 +35,8 @@ CONFIG_KEYS = [
     "GITHUB_RELEASE_TAG",
     "GITHUB_RELEASE_NAME",
     "GITHUB_ASSET_PREFIX",
+    "CODEX_MODEL",
+    "CODEX_REASONING_EFFORT",
 ]
 
 
@@ -77,6 +79,8 @@ def get_config():
             "GITHUB_RELEASE_NAME", "Video Agent Temporary Uploads"
         ),
         "github_asset_prefix": value("GITHUB_ASSET_PREFIX", "video-agent"),
+        "codex_model": value("CODEX_MODEL", ""),
+        "codex_reasoning_effort": value("CODEX_REASONING_EFFORT", ""),
     }
     config["base_url"] = resolve_dashscope_base_url(config)
     return config
@@ -108,6 +112,8 @@ def save_config(updates):
         "GITHUB_RELEASE_NAME": updates.get("github_release_name")
         or "Video Agent Temporary Uploads",
         "GITHUB_ASSET_PREFIX": updates.get("github_asset_prefix") or "video-agent",
+        "CODEX_MODEL": updates.get("codex_model"),
+        "CODEX_REASONING_EFFORT": updates.get("codex_reasoning_effort"),
     }
     # Blank secret fields in the GUI mean "keep existing".
     current = read_env()

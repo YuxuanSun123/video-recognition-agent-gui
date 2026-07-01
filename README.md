@@ -1,37 +1,39 @@
 # Shot Reader / 视频识别 Agent GUI
 
-Shot Reader 是一个面向影视拉片、逐镜分析和多模态视频审阅的桌面工具。它把视频、字幕和补充要求交给阿里云百炼 / DashScope 模型，生成带截图、镜号、时间码、景别、镜头运动、画面内容、声音音乐和分析注释的逐镜报告，并支持导出 Markdown 与 CSV。
+Shot Reader 是一个面向影视拉片、逐镜分析和多模态视频审阅的桌面工具。当前主入口是类似 OpenDesign 的 Codex 图形化工作台：用户在桌面 GUI 中发起任务，本地 daemon 调用 Codex CLI、ffmpeg 等本地工具完成抽帧和结构化分析，生成带截图、镜号、时间码、景别、镜头运动、画面内容、声音音乐和分析注释的逐镜报告，并支持导出 Markdown 与 CSV。
 
 当前主版本采用 `Tauri + React/Vite + Python FastAPI sidecar`：
 
 - `React/Vite` 负责套印报告风格界面、抽屉切换、报告库、提示词和设置页。
 - `Tauri` 负责桌面窗口、打包、系统级启动和跨平台安装包。
-- `FastAPI sidecar` 负责本地配置、DashScope 调用、GitHub Releases 临时上传、缩略图生成和导出。
+- `FastAPI sidecar` 负责 Codex 状态检测、任务目录、抽帧、Codex Agent 调用、DashScope 旧模式、GitHub Releases 临时上传、缩略图生成和导出。
 
 ## 功能亮点
 
 - 逐镜拉片表格：截图、镜号、时间码、景别、镜头运动、画面内容、声音音乐、分析注释。
 - 双层抽屉工作区：输入设置和逐镜结果在同一区域滑动切换。
+- 默认 Codex Agent 模式：使用本机 Codex CLI 登录态，不要求用户在 Shot Reader 内填写 OpenAI API Key。
+- Codex 状态面板：显示 CLI 安装、登录、模型、推理强度和本地 daemon 状态。
 - 支持三种视频输入：本地路径、公网 URL、GitHub Releases 临时 URL。
-- 支持本地路径模式：通过 DashScope SDK 传入本地视频文件，单文件建议不超过 100MB。
+- 支持本地路径模式：复制视频到本地任务目录并抽帧，单文件建议不超过 100MB。
 - 支持公网 URL 模式：适合较大视频，由模型服务直接读取可访问 URL。
 - 支持 GitHub Releases 上传：把本地视频临时上传为公开下载地址，再交给模型分析。
-- 默认模型：
+- 旧模式仍保留 DashScope / Qwen 模型：
   - `qwen3.7-plus`：视频理解主力，适合视觉叙事、逐镜结构化报告。
   - `qwen3.5-omni-plus`：声音/对白专精，适合对白、音乐、环境声更重要的场景。
 - 支持抽帧 fps：`0.2`、`0.5`、`1`、`2`。
 - 支持字幕/ASR 文本和补充分析要求。
 - 支持导出 Markdown 与 CSV。
-- API Key 和上传配置只保存在本机 `.env` 或应用数据目录，不会写入 Release 包。
+- API Key、Codex 登录态和上传配置只保存在本机，不会写入仓库或 Release 包。
 
 ## 下载使用
 
 在 GitHub Releases 页面下载对应系统版本：
 
-- Windows：下载 `Shot-Reader-Windows-Portable-v0.2.1.zip` 或安装包，解压后运行 `Shot Reader.exe`。
+- Windows：下载 `Shot-Reader-Windows-Portable-v0.2.2-codex.zip` 或安装包，解压后运行 `Shot Reader.exe`。
 - macOS：下载 macOS 版本资产后打开应用。未签名版本首次启动可能需要右键应用选择“打开”。
 
-首次启动后，进入“设置与密钥”保存 DashScope API Key、工作空间信息和可选 GitHub 上传配置。
+首次启动后，进入“设置与运行时”查看 Codex 状态。Codex 模式需要本机已经安装并登录 Codex CLI；DashScope/Qwen 仍保留为高级旧模式，可在同一设置页保存相关 API Key。
 
 ### macOS 未签名提示
 
@@ -62,6 +64,9 @@ DASHSCOPE_REGION=cn-beijing
 ALIYUN_VISION_MODEL=qwen3.7-plus
 ALIYUN_OMNI_MODEL=qwen3.5-omni-plus
 
+CODEX_MODEL=
+CODEX_REASONING_EFFORT=
+
 GITHUB_TOKEN=
 GITHUB_OWNER=
 GITHUB_REPO=
@@ -78,11 +83,13 @@ DASHSCOPE_BASE_URL=https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible
 
 `.env` 已在 `.gitignore` 中忽略，不会被提交到仓库。
 
+Codex 模式不会读取或收集 OpenAI API Key。模型和推理强度可以在“设置与运行时”里设置；留空时跟随本机 Codex 默认配置。
+
 ## 视频输入方式
 
 ### 本地路径
 
-上传方式选择“本地路径”。平台会通过 DashScope SDK 使用本地文件路径调用模型。这个模式适合小文件和本地测试，视频本身建议不超过 100MB。
+上传方式选择“本地路径”。Codex Agent 模式会把视频复制到本地任务目录，使用本机工具抽帧，再交给 Codex 生成结构化报告。这个模式适合小文件和本地测试，视频本身建议不超过 100MB。
 
 ### 公网 URL
 
@@ -160,8 +167,8 @@ src-tauri/target/release/bundle/macos/
 发布新版本：
 
 ```powershell
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.2.2-codex
+git push origin v0.2.2-codex
 ```
 
 工作流会在 GitHub runner 上分别构建：
@@ -202,6 +209,7 @@ APPLE_TEAM_ID
 ├── src/                      # React / Vite 工作台
 ├── src-tauri/                # Tauri 桌面壳
 ├── backend_api.py            # FastAPI 本地 sidecar
+├── codex_agent_core.py       # Codex 状态检测、任务目录、抽帧和 Agent 报告生成
 ├── video_agent_core.py       # 配置、上传、DashScope 调用、解析和导出
 ├── scripts/                  # sidecar 构建脚本
 ├── requirements.txt          # Python 依赖
@@ -212,8 +220,9 @@ APPLE_TEAM_ID
 ## 安全说明
 
 - 不要提交 `.env`。
+- 不要提交 Codex `auth.json`、本地 token、API Key 或任何登录态文件。
 - 不要把真实 API Key 写进 README、issue、截图或聊天记录。
-- Release 包不包含你的本地 API Key。
+- Release 包不包含你的本地 API Key 或 Codex 登录态。
 - 如果使用 GitHub Releases 作为临时视频 URL，请确认视频内容适合公开访问。
 
 ## 参考

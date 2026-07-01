@@ -489,6 +489,76 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 @keyframes blink { 50% { opacity: .32; } }
 
+.agent-card,
+.runtime-card {
+  border: 2.5px solid var(--ink);
+  background: var(--white);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 16px 18px;
+}
+.agent-card.ok,
+.runtime-card.ok {
+  box-shadow: 5px 5px 0 0 var(--acid);
+}
+.agent-card.warn,
+.runtime-card.warn {
+  box-shadow: 5px 5px 0 0 var(--ember);
+}
+.agent-card .ek,
+.runtime-card .ek {
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--acid);
+  margin: 0 0 7px;
+}
+.agent-card h4,
+.runtime-card h3 {
+  font-family: var(--fd);
+  font-weight: 900;
+  text-transform: uppercase;
+  margin: 0;
+}
+.agent-card h4 {
+  font-size: 18px;
+}
+.runtime-card h3 {
+  font-size: 24px;
+  line-height: 1.08;
+}
+.agent-card p,
+.runtime-card p {
+  margin: 7px 0 0;
+  color: var(--n700);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.agent-meter,
+.runtime-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.agent-meter span,
+.runtime-facts span {
+  border: 1.5px solid var(--ink);
+  background: var(--paper2);
+  color: var(--ink);
+  padding: 6px 9px;
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .ttools {
   display: flex;
   align-items: center;

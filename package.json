@@ -1,7 +1,7 @@
 {
   "name": "shot-reader-tauri",
-  "version": "0.2.1",
-  "description": "Desktop shot-by-shot video analysis app powered by DashScope, React, FastAPI, and Tauri.",
+  "version": "0.2.2",
+  "description": "Desktop Codex workbench for shot-by-shot video analysis, built with React, FastAPI, and Tauri.",
   "type": "module",
   "scripts": {
     "backend": "py -m uvicorn backend_api:app --host 127.0.0.1 --port 8765 --reload",

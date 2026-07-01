@@ -65,8 +65,10 @@ const demoShots = [
 function App() {
   const [tab, setTab] = useState("analysis");
   const [drawer, setDrawer] = useState("setup");
-  const [status, setStatus] = useState("DASHSCOPE 连接中");
+  const [status, setStatus] = useState("CODEX 检测中");
   const [health, setHealth] = useState(null);
+  const [codexStatus, setCodexStatus] = useState(null);
+  const [job, setJob] = useState(null);
   const [settings, setSettings] = useState({});
   const [report, setReport] = useState(emptyReport);
   const [busy, setBusy] = useState(false);
@@ -75,7 +77,7 @@ function App() {
     videoUrl: "",
     title: "逐镜拉片报告",
     fps: "1",
-    analysisMode: "vision",
+    analysisMode: "codex",
     uploadMode: "local",
     subtitleText: "",
     customPrompt: "",
@@ -83,8 +85,20 @@ function App() {
   const [file, setFile] = useState(null);
 
   useEffect(() => {
-    refreshHealth();
-    loadSettings();
+    let cancelled = false;
+    async function bootRuntime() {
+      for (let attempt = 0; attempt < 18 && !cancelled; attempt += 1) {
+        const healthOk = await refreshHealth({ booting: true });
+        const codexOk = await refreshCodexStatus({ booting: true });
+        if (healthOk) loadSettings();
+        if (healthOk && codexOk) return;
+        await sleep(900 + Math.min(attempt, 6) * 350);
+      }
+    }
+    bootRuntime();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const hasReport = Boolean(report.shots?.length);
@@ -98,13 +112,36 @@ function App() {
     );
   }, [shots, filter]);
 
-  async function refreshHealth() {
+  async function refreshHealth(options = {}) {
     try {
       const data = await request("/api/health");
       setHealth(data);
-      setStatus(data.dashscope ? "DASHSCOPE 已连接" : "等待保存 API Key");
+      setStatus(data.codexAvailable ? "Codex CLI 已检测，正在确认登录" : "未检测到 Codex CLI");
+      return true;
     } catch (error) {
-      setStatus("本地后端未连接");
+      setStatus(options.booting ? "本地 daemon 启动中，正在重试" : "本地后端未连接");
+      return false;
+    }
+  }
+
+  async function refreshCodexStatus(options = {}) {
+    try {
+      const data = await request("/api/codex/status");
+      setCodexStatus(data);
+      setStatus(data.ready ? "CODEX 已就绪" : data.message || "Codex 不可用");
+      return true;
+    } catch (error) {
+      setCodexStatus({
+        ready: false,
+        installed: null,
+        authenticated: null,
+        status: "backend-starting",
+        message: options.booting
+          ? "本地 daemon 正在启动或连接中，Shot Reader 会自动重试。"
+          : `本地后端未连接：${error.message}`,
+      });
+      setStatus(options.booting ? "本地 daemon 启动中，正在重试" : `Codex 检测失败：${error.message}`);
+      return false;
     }
   }
 
@@ -123,7 +160,8 @@ function App() {
   async function runAnalyze() {
     setDrawer("result");
     setBusy(true);
-    setStatus("正在分析视频");
+    setJob(null);
+    setStatus(form.analysisMode === "codex" ? "正在创建 Codex 分析任务" : "正在分析视频");
     const body = new FormData();
     body.set("mode", form.uploadMode);
     body.set("title", form.title);
@@ -134,13 +172,33 @@ function App() {
     body.set("custom_prompt", form.customPrompt);
     if (file) body.set("file", file);
     try {
-      const data = await request("/api/analyze", { method: "POST", body });
-      setReport(data.report);
-      setStatus(`分析完成：${data.report?.shots?.length || 0} 镜`);
+      if (form.analysisMode === "codex") {
+        const created = await request("/api/codex/analyze", { method: "POST", body });
+        setJob(created);
+        setStatus(created.message || "Codex 任务已创建");
+        const done = await pollJob(created.id);
+        setReport(done.report);
+        setStatus(`Codex 分析完成：${done.report?.shots?.length || 0} 镜`);
+      } else {
+        const data = await request("/api/analyze", { method: "POST", body });
+        setReport(data.report);
+        setStatus(`分析完成：${data.report?.shots?.length || 0} 镜`);
+      }
     } catch (error) {
       setStatus(`错误：${error.message}`);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function pollJob(jobId) {
+    for (;;) {
+      await sleep(1500);
+      const data = await request(`/api/jobs/${jobId}`);
+      setJob(data);
+      setStatus(data.message || `Codex 任务状态：${data.status}`);
+      if (data.status === "completed") return data;
+      if (data.status === "failed") throw new Error(data.error || data.message || "Codex 分析失败");
     }
   }
 
@@ -177,6 +235,7 @@ function App() {
       setSettings(data);
       setStatus("配置已保存");
       refreshHealth();
+      refreshCodexStatus();
     } catch (error) {
       setStatus(`保存失败：${error.message}`);
     } finally {
@@ -234,8 +293,8 @@ function App() {
   return (
     <div className="shell">
       <div className="app">
-        <Sidebar tab={tab} setTab={setTab} status={status} health={health} />
-        <Spine form={form} status={status} health={health} report={report} />
+        <Sidebar tab={tab} setTab={setTab} status={status} health={health} codexStatus={codexStatus} />
+        <Spine form={form} status={status} health={health} report={report} codexStatus={codexStatus} />
         <main className="main">
           {tab === "analysis" && (
             <AnalysisPage
@@ -253,6 +312,8 @@ function App() {
               isDemo={!hasReport}
               busy={busy}
               status={status}
+              codexStatus={codexStatus}
+              job={job}
               filter={filter}
               setFilter={setFilter}
               onAnalyze={runAnalyze}
@@ -263,14 +324,14 @@ function App() {
           )}
           {tab === "library" && <LibraryPage setTab={setTab} report={report} onExportMarkdown={exportMarkdown} onExportCsv={exportCsv} />}
           {tab === "prompts" && <PromptsPage />}
-          {tab === "settings" && <SettingsPage settings={settings} setSettings={setSettings} onSave={saveSettings} onRefresh={loadSettings} />}
+          {tab === "settings" && <SettingsPage settings={settings} setSettings={setSettings} onSave={saveSettings} onRefresh={loadSettings} codexStatus={codexStatus} onRefreshCodex={refreshCodexStatus} />}
         </main>
       </div>
     </div>
   );
 }
 
-function Sidebar({ tab, setTab, status, health }) {
+function Sidebar({ tab, setTab, status, health, codexStatus }) {
   return (
     <aside className="rail">
       <div className="rail-wm">
@@ -280,24 +341,24 @@ function Sidebar({ tab, setTab, status, health }) {
         <button type="button" aria-current={tab === "analysis" ? "page" : undefined} className={tab === "analysis" ? "on" : ""} onClick={() => setTab("analysis")}>分析任务</button>
         <button type="button" aria-current={tab === "library" ? "page" : undefined} className={tab === "library" ? "on" : ""} onClick={() => setTab("library")}>报告库</button>
         <button type="button" aria-current={tab === "prompts" ? "page" : undefined} className={tab === "prompts" ? "on" : ""} onClick={() => setTab("prompts")}>提示词</button>
-        <button type="button" aria-current={tab === "settings" ? "page" : undefined} className={tab === "settings" ? "on" : ""} onClick={() => setTab("settings")}>设置与密钥</button>
+        <button type="button" aria-current={tab === "settings" ? "page" : undefined} className={tab === "settings" ? "on" : ""} onClick={() => setTab("settings")}>设置与运行时</button>
       </nav>
       <div className="rail-stat">
         <div className="v"><i />{status}</div>
-        <p>{health?.visionModel || "QWEN3.7-PLUS"}<br />本地后端<br />{API_LABEL}</p>
+        <p>{runtimeLabel(health, codexStatus)}<br />本地 daemon<br />{API_LABEL}</p>
       </div>
     </aside>
   );
 }
 
-function Spine({ form, status, health, report }) {
+function Spine({ form, status, health, report, codexStatus }) {
   const shotCount = String(report?.shots?.length || 0).padStart(2, "0");
   const sceneCount = String(report?.meta?.sceneCount || 0).padStart(2, "0");
   const items = [
     `● ${status}`,
-    `MODEL ${(form.analysisMode === "omni" ? health?.omniModel : health?.visionModel) || "QWEN3.7-PLUS"}`,
+    `MODEL ${analysisModelLabel(form.analysisMode, health, codexStatus)}`,
     `FPS ${Number(form.fps || 1).toFixed(1)}`,
-    `模式 ${form.analysisMode === "omni" ? "声音/对白专精" : "全模态 · 视频+声音"}`,
+    `模式 ${analysisModeLabel(form.analysisMode)}`,
     `上传 ${uploadLabel(form.uploadMode)}`,
     `就绪 ${sceneCount} / ${shotCount}`,
   ];
@@ -327,6 +388,8 @@ function AnalysisPage(props) {
     isDemo,
     busy,
     status,
+    codexStatus,
+    job,
     filter,
     setFilter,
     onAnalyze,
@@ -374,13 +437,28 @@ function AnalysisPage(props) {
               <span className="led" />
               <strong>{busy ? "ANALYZING" : hasReport ? "REPORT READY" : "READY"}</strong>
               <span>{status}</span>
-              <span className="right">{form.analysisMode === "omni" ? "声音/对白专精" : "视频理解主力"} · {uploadLabel(form.uploadMode)}</span>
+              <span className="right">{analysisModeLabel(form.analysisMode)} · {uploadLabel(form.uploadMode)}</span>
             </div>
+            {form.analysisMode === "codex" && (
+              <div className={`agent-card ${codexStatus?.ready ? "ok" : "warn"}`}>
+                <div>
+                  <p className="ek">CODEX AGENT MODE</p>
+                  <h4>{codexStatus?.ready ? "Codex 本地运行时已就绪" : "等待 Codex 运行时"}</h4>
+                  <p>{codexStatus?.message || "将使用本机 Codex 登录状态、关键帧图片和本地任务目录生成逐镜报告。"}</p>
+                </div>
+                <div className="agent-meter">
+                  <span>{codexStatus?.version || "Codex CLI"}</span>
+                  <span>{codexStatus?.authMode || "login"}</span>
+                  <span>{codexStatus?.model || "默认模型"}</span>
+                  <span>{reasoningEffortLabel(codexStatus?.reasoningEffort)}</span>
+                </div>
+              </div>
+            )}
             <div className="form">
               <Field span="s3" label="视频公网 URL"><input className="inp" value={form.videoUrl} onChange={(e) => updateForm("videoUrl", e.target.value)} placeholder="https://example.com/clip.mp4" /></Field>
               <Field span="s2" label="报告标题"><input className="inp" value={form.title} onChange={(e) => updateForm("title", e.target.value)} /></Field>
               <Field label="抽帧 FPS"><select className="sel" value={form.fps} onChange={(e) => updateForm("fps", e.target.value)}><option>0.2</option><option>0.5</option><option>1</option><option>2</option></select></Field>
-              <Field span="s2" label="分析模型"><select className="sel" value={form.analysisMode} onChange={(e) => updateForm("analysisMode", e.target.value)}><option value="vision">视频理解主力（qwen3.7-plus）</option><option value="omni">声音/对白专精（qwen3.5-omni-plus）</option></select></Field>
+              <Field span="s2" label="分析模式"><select className="sel" value={form.analysisMode} onChange={(e) => updateForm("analysisMode", e.target.value)}><option value="codex">Codex Agent（本地登录）</option><option value="vision">旧模式：视频理解主力（qwen3.7-plus）</option><option value="omni">旧模式：声音/对白专精（qwen3.5-omni-plus）</option></select></Field>
               <Field span="s2" label="上传方式"><select className="sel" value={form.uploadMode} onChange={(e) => updateForm("uploadMode", e.target.value)}><option value="local">本地路径 · 100MB</option><option value="github">GitHub Releases</option><option value="url">公网 URL</option></select></Field>
               <Field span="s2" label="本地文件">
                 <div className="file-row">
@@ -402,7 +480,7 @@ function AnalysisPage(props) {
               <div className="l"><span className="otag acid">逐镜表格</span><span className="otag">{isDemo ? "样例数据" : `${totalShots} 镜头`}</span><span className="otag">{sceneCount} 场景</span></div>
               <input className="filter" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="筛选镜头、画面、注释" />
             </div>
-            {busy && <div className="busybar"><span />正在等待模型返回结构化逐镜结果</div>}
+            {busy && <div className="busybar"><span />{job?.message || "正在等待 Agent 返回结构化逐镜结果"}</div>}
             <ShotTable shots={shots} isDemo={isDemo} />
           </div>
         </section>
@@ -502,15 +580,55 @@ function PromptsPage() {
   );
 }
 
-function SettingsPage({ settings, setSettings, onSave, onRefresh }) {
+function SettingsPage({ settings, setSettings, onSave, onRefresh, codexStatus, onRefreshCodex }) {
   function set(key, value) {
     setSettings((prev) => ({ ...prev, [key]: value }));
   }
   return (
     <>
-      <Header eyebrow="No.09 / ALIYUN MODEL STUDIO" title="设置与密钥" actions={<><button className="obtn" onClick={onRefresh}>刷新</button><button className="obtn run" onClick={onSave}>保存配置</button></>} />
+      <Header eyebrow="No.09 / LOCAL RUNTIME" title="设置与运行时" actions={<><button className="obtn" onClick={onRefreshCodex}>检测 Codex</button><button className="obtn" onClick={onRefresh}>刷新配置</button><button className="obtn run" onClick={onSave}>保存配置</button></>} />
       <div className="body560">
         <div className="panel cfg">
+          <div className={`runtime-card ${codexStatus?.ready ? "ok" : "warn"}`}>
+            <div>
+              <p className="ek">CODEX RUNTIME</p>
+              <h3>{codexStatus?.ready ? "Codex 图形化工作台已就绪" : "Codex 暂不可用"}</h3>
+              <p>{codexStatus?.message || "Shot Reader 会优先使用本机 Codex 登录状态运行分析任务，不需要在这里填写 OpenAI API Key。"}</p>
+            </div>
+            <div className="runtime-facts">
+              <span>{installStateLabel(codexStatus)}</span>
+              <span>{authStateLabel(codexStatus)}</span>
+              <span>{codexStatus?.model || "默认模型"}</span>
+              <span>{reasoningEffortLabel(codexStatus?.reasoningEffort)}</span>
+              <span>{codexStatus?.version || "version unknown"}</span>
+            </div>
+          </div>
+          <div className="cfg-div"><h4>Codex Agent 默认参数</h4><p>这里控制 Shot Reader 调用 Codex 时使用的模型和推理强度；留空则跟随你本机 Codex 的默认配置。</p></div>
+          <div className="cfg-g2">
+            <div className="fld">
+              <label className="fld-l">Codex 模型</label>
+              <input className="inp" list="codex-models" value={settings.codex_model || ""} onChange={(e) => set("codex_model", e.target.value)} placeholder={codexStatus?.model || "跟随 Codex 默认"} />
+              <datalist id="codex-models">
+                <option value="gpt-5.5" />
+                <option value="gpt-5.4" />
+                <option value="gpt-5.4-mini" />
+              </datalist>
+              <span className="fnote">可手动输入 Codex 支持的模型名</span>
+            </div>
+            <div className="fld">
+              <label className="fld-l">推理强度</label>
+              <select className="sel" value={settings.codex_reasoning_effort || ""} onChange={(e) => set("codex_reasoning_effort", e.target.value)}>
+                <option value="">跟随 Codex 默认</option>
+                <option value="minimal">minimal · 最快</option>
+                <option value="low">low · 轻量</option>
+                <option value="medium">medium · 平衡</option>
+                <option value="high">high · 深度</option>
+                <option value="xhigh">xhigh · 最强</option>
+              </select>
+              <span className="fnote">越高越慢，也更消耗额度</span>
+            </div>
+          </div>
+          <div className="cfg-div"><h4>DashScope / GitHub 旧模式配置</h4><p>这些配置只用于旧的 Qwen API 模式和 GitHub Releases 临时 URL；Codex Agent 默认模式不会读取 OpenAI API Key。</p></div>
           <div className="fld"><label className="fld-l">DASHSCOPE_API_KEY</label><input className="inp" type="password" value={settings.dashscope_api_key || ""} onChange={(e) => set("dashscope_api_key", e.target.value)} placeholder={settings.dashscope_api_key_masked || "未保存"} /><span className="fnote">留空保存时会保留原值</span></div>
           <div className="cfg-g3">
             <ConfigInput label="Workspace ID" value={settings.workspace_id} onChange={(v) => set("workspace_id", v)} />
@@ -587,6 +705,43 @@ function uploadLabel(mode) {
   if (mode === "github") return "GitHub Releases";
   if (mode === "url") return "公网 URL";
   return "本地路径 · 100MB";
+}
+
+function analysisModeLabel(mode) {
+  if (mode === "codex") return "Codex Agent · 本地运行时";
+  if (mode === "omni") return "声音/对白专精";
+  return "视频理解主力";
+}
+
+function analysisModelLabel(mode, health, codexStatus) {
+  if (mode === "codex") return codexStatus?.model || "CODEX";
+  if (mode === "omni") return health?.omniModel || "qwen3.5-omni-plus";
+  return health?.visionModel || "qwen3.7-plus";
+}
+
+function runtimeLabel(health, codexStatus) {
+  if (codexStatus?.ready) return `CODEX ${codexStatus.version || ""}`.trim();
+  if (codexStatus?.status === "backend-starting") return "DAEMON 启动中";
+  if (health?.codexAvailable) return "CODEX 待登录";
+  return "CODEX 未安装";
+}
+
+function installStateLabel(codexStatus) {
+  if (!codexStatus || codexStatus.installed == null) return "检测中";
+  return codexStatus.installed ? "CLI 已安装" : "未安装 CLI";
+}
+
+function authStateLabel(codexStatus) {
+  if (!codexStatus || codexStatus.authenticated == null) return "检测中";
+  return codexStatus.authenticated ? "已登录" : "未登录";
+}
+
+function reasoningEffortLabel(value) {
+  return value ? `推理 ${String(value).toUpperCase()}` : "默认推理";
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 createRoot(document.getElementById("root")).render(<App />);
